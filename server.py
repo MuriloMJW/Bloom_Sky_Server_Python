@@ -50,33 +50,32 @@ class Player():
 
 
 
-async def received_packets(buff, id):
+async def received_packets(packet, id):
 
-    myBufferRead = MyBuffer(buff)
+    buffer = MyBuffer(packet)
 
-    msgid = myBufferRead.buffer_read(buffer.BUFFER_U8)
+    msgid = buffer.read_u8()
 
     match msgid:
 
         case network.player_establish:
             print("===Player Establish===")
-            buffer_ = bytearray()
-            myBufferWrite = MyBuffer(buffer_)
-
+            
+            buffer.clear()
+            
             # Altera no dictionary
             players[id].set_x(400)
             players[id].set_y(400)
 
             player = players[id]
-
-            myBufferWrite.buffer_write(buffer.BUFFER_U8, network.player_connect)
-            myBufferWrite.buffer_write(buffer.BUFFER_U16, player.x)
-            myBufferWrite.buffer_write(buffer.BUFFER_U16, player.y)
-            myBufferWrite.buffer_write(buffer.BUFFER_STRING, str(player.id))
-
-            print("Packet enviado: ", buffer_)
             
-            await player.websocket.send(buffer_)
+            buffer.write_u8(network.player_connect)
+            buffer.write_u16(player.x)
+            buffer.write_u16(player.y)
+            buffer.write_string(str(player.id))
+
+            await send_packet(player, buffer)
+            '''
 
             # Avisar a quem se conectou (new_player) a posição dos outros os jogadores
             for other_player in players.values():
@@ -92,7 +91,7 @@ async def received_packets(buff, id):
 
                     #print("Quem entrou sobre todos: Avisando o player ", player.id, " sobre o ", p.id)
 
-                    await player.websocket.send(buffer_)
+                    await send_packet(player, buffer_)
 
             # Avisar aos outros jogadores a posição de quem se conectou (new_player)
             for other_player in players.values():
@@ -107,9 +106,11 @@ async def received_packets(buff, id):
                     myBufferWrite.buffer_write(buffer.BUFFER_STRING, str(player.id))
 
                     print("Todos sobre quem entrou: Avisando o player ", other_player.id, " : ", player.id, " conectou-se")
-                    await other_player.websocket.send(buffer_)
 
+                    await send_packet(other_player, buffer_)
 
+            '''
+            '''
         case network.player_move:
             print("===Player Move===")
 
@@ -126,7 +127,7 @@ async def received_packets(buff, id):
             myBufferWrite.buffer_write(buffer.BUFFER_U16, move_x)
             myBufferWrite.buffer_write(buffer.BUFFER_U16, move_y)
 
-            await player.websocket.send(buffer_)
+            await send_packet(player, buffer_)
 
             # Após o pacote enviado, atualiza no dict a posição
             players[id].set_x(move_x)
@@ -145,43 +146,35 @@ async def received_packets(buff, id):
                     myBufferWrite.buffer_write(buffer.BUFFER_U16, move_y)
 
                     #print("Todos sobre quem entrou: Avisando o player ", p.id, " sobre o ", player.id)
-                    await other_player.websocket.send(buffer_)
+                    await send_packet(other_player, buffer_)
 
             #Colocar aqui o X e Y do player
-
+            '''    
         case network.player_chat:
             print("===Player Chat===")
 
-            buffer_ = bytearray()
-            myBufferWrite = MyBuffer(buffer_)
 
             player = players[id]
 
             chat_text = "["+str(player.id)+"] "
-            chat_text = "["+str(player.id)+"] "
 
-            try:
+            chat_text += buffer.read_string()
+            print(chat_text)
+
+            # Avisa a todos os jogadores o chat
+            for other_player in players.values():
+
+                buffer.clear()
+
+                buffer.write_u8(network.player_chat)
+                buffer.write_string(chat_text)
                 
-                chat_text += myBufferRead.buffer_read(buffer.BUFFER_STRING)
-                print(chat_text)
-
-                # Avisa a todos os jogadores o chat
-                for other_player in players.values():
-
-                    buffer_ = bytearray()
-                    myBufferWrite = MyBuffer(buffer_)
-
-                    myBufferWrite.buffer_write(buffer.BUFFER_U8, network.player_chat)
-                    myBufferWrite.buffer_write(buffer.BUFFER_STRING, chat_text)
+                await send_packet(other_player, buffer)
                     
-                    await send_packet(other_player, buffer_)
-                    
-            except:
-                print("Erro provavel de non ascii")
 
 
-async def send_packet(player, packet):
-    await player.websocket.send(packet)
+async def send_packet(player, packet : MyBuffer):
+    await player.websocket.send(packet.get_data_array())
     
 
 #Couroutine executada com a conexão recebida
@@ -199,25 +192,21 @@ async def handler(websocket):
     players[id] = player
 
     id += 1
-
-    send_buffer = bytearray()
-    myBuffer_2 = MyBuffer(send_buffer)
-
-
-    myBuffer_2.buffer_write(buffer.BUFFER_U8, network.player_establish)
-    myBuffer_2.buffer_write(buffer.BUFFER_U8, player.id)
-
-
-    await websocket.send(send_buffer)
+    
+    buffer = MyBuffer()
+    buffer.write_u8(network.player_establish)
+    buffer.write_u8(player.id)
+    
+    await send_packet(player, buffer)
 
     try:
         while True: #Fica ouvindo as mensagens recebidas de cada websocket para sempre, mantendo a conexão ligada
-            _buffer = await websocket.recv() #
-            print(_buffer)
-            print(*_buffer)
+            packet = await websocket.recv() #
+            print(packet)
+            print(*packet)
 
             # Received Packets com o buffer recebido e o Id de quem enviou
-            await received_packets(_buffer, player.id)
+            await received_packets(packet, player.id)
 
     except websockets.exceptions.ConnectionClosed as e:
             print("Erro: Jogador desconectado. ", e)

@@ -6,93 +6,133 @@ BUFFER_U8 = 1  # Leitura de 1 byte
 BUFFER_U16 = 2  # Leitura de 2 bytes
 BUFFER_STRING = 3  # Leitura de strings terminadas por byte nulo (0x00)
 
-# Ideia de herdar da byte array e mudar tudo para self
 
 class MyBuffer:
     """
     Classe para leitura sequencial de dados de um buffer de bytes.
     """
 
-    def __init__(self, data: bytes=b''):
+    def __init__(self, buffer):
         """
         Inicializa o buffer de leitura.
 
         :param buffer: Sequência de bytes a ser lida
         """
-        self.data_array = bytearray(data)  # Se eu quiser já instanciar com parametro
+        self.buffer = buffer  # Dados brutos do buffer
         self.pos = 0  # Posição atual de leitura (em bytes)
+        self.length = len(buffer)  # Comprimento total do buffer
+        self.buf = BytesIO(buffer)  # Objeto BytesIO para operações de leitura
         
     def read_u8(self):
-        data = self.data_array[self.pos]
-        self.pos += 1  # Atualiza posição de leitura
-        return data
+        data = self.buf.read(BUFFER_U8)
+        self.pos = self.buf.tell()  # Atualiza posição de leitura
+        return data[0]
     
     def read_u16(self):
         # Lê 2 bytes e converte para inteiro
-        (data,) = struct.unpack_from('H', self.data_array, self.pos)
-        self.pos += BUFFER_U16  # Atualiza posição de leitura
-        return data
+        data = self.buf.read(BUFFER_U16)
+        self.pos = self.buf.tell()  # Atualiza posição de leitura
+        (aux, ) = struct.unpack('H', data)  # H = short (2 bytes)
+        return aux
         
     def read_string(self):
+        # Encontra o próximo byte nulo (0x00) a partir da posição atual
+        pos_null = self.buffer.index(0, self.buf.tell())
+        # Calcula o tamanho da string em bytes (excluindo o byte nulo)
+        size = pos_null - self.buf.tell()
+        # Lê e decodifica a sequência de bytes como ASCII
+        text = self.buf.read(size).decode('ascii')
+        # Consome o byte nulo final e atualiza a posição
+        self.buf.read(1)
+        self.pos = self.buf.tell()
+        return str(text)
         
-        start = self.pos
-        
-        # Procura a posição do byte nulo, a partir do da posição de leitura atual
-        # end é posição do buffer do byte nulo, ou seja, onde termina a string
-        end = self.data_array.find(0, start)
-        
-        # Tamanho da string é a posição do caractere final menos a posição do inicial
-        string_size =  end - start
-        
-        # Recebe uma tupla de 1 elemento do tipo bytes, esse elemento possui tamanho string_size
-        (text_encoded,) = struct.unpack_from(f'{string_size}s', self.data_array, start)
-        # Converte em string ascii
-        text_decoded = text_encoded.decode('ascii')
-        
-        # Alternativa com slice: text_encoded = self.buffer[start:end]
-        
-        self.pos += string_size
-        
-        return text_decoded
         
     def write_u8(self, data):
-        self.data_array += struct.pack('B', data)
+        _data = struct.pack("B", data)
         self.pos += BUFFER_U8
+        self.buffer += _data
         
     def write_u16(self, data):
-        data_bytes = struct.pack("H", data)
-        self.data_array += data_bytes
+        _data = struct.pack("H", data)
         self.pos += BUFFER_U16
+        self.buffer += _data
         
     def write_string(self, data):
         text_encoded = data.encode('ascii')
-        string_size = len(text_encoded)
+        text_size = len(text_encoded)
         #_data = struct.pack(f'{text_size}s', text_encoded) com 0 no final
-        self.data_array += struct.pack(f'{string_size}s', text_encoded)
+        _data = struct.pack(f'{text_size}s', text_encoded)
 
-        self.pos += string_size
+        self.pos += text_size
+        self.buffer += _data
         
-    def seek_start(self):
+    def buffer_read(self, data_type):
+        """
+        Lê dados do buffer com base no tipo especificado.
+
+        :param data_type: Tipo de dado a ser lido (BUFFER_U8 ou BUFFER_STRING)
+        :return: Valor lido (int para BUFFER_U8 ou str para BUFFER_STRING)
+        """
+        if data_type == BUFFER_U8:
+            # Lê um único byte e converte para inteiro
+            #self.buf.seek(self.pos)
+            data = self.buf.read(BUFFER_U8)
+            self.pos = self.buf.tell()  # Atualiza posição de leitura
+            return data[0]
+
+        if data_type == BUFFER_U16:
+            # Lê 2 bytes e converte para inteiro
+            data = self.buf.read(BUFFER_U16)
+            self.pos = self.buf.tell()  # Atualiza posição de leitura
+            (aux, ) = struct.unpack('H', data)  # H = short (2 bytes)
+            return aux
+
+        if data_type == BUFFER_STRING:
+            # Encontra o próximo byte nulo (0x00) a partir da posição atual
+            pos_null = self.buffer.index(0, self.buf.tell())
+            # Calcula o tamanho da string em bytes (excluindo o byte nulo)
+            size = pos_null - self.buf.tell()
+            # Lê e decodifica a sequência de bytes como ASCII
+            text = self.buf.read(size).decode('ascii')
+            # Consome o byte nulo final e atualiza a posição
+            self.buf.read(1)
+            self.pos = self.buf.tell()
+            return str(text)
+
+    def buffer_write(self, data_type, data):
+        """
+        Escreve dados do buffer com base no tipo especificado.
+
+        :param data_type: Tipo de dado a ser lido (BUFFER_U8 ou BUFFER_STRING)
+        :return: Valor lido (int para BUFFER_U8 ou str para BUFFER_STRING)
+        """
+        if data_type == BUFFER_U8:
+            _data = struct.pack("B", data)
+            self.pos += BUFFER_U8
+            self.buffer += _data
+
+        if data_type == BUFFER_U16:
+            _data = struct.pack("H", data)
+            self.pos += BUFFER_U16
+            self.buffer += _data
+
+        if data_type == BUFFER_STRING:
+
+            text_encoded = data.encode('ascii')
+            text_size = len(text_encoded)
+            #_data = struct.pack(f'{text_size}s', text_encoded) com 0 no final
+            _data = struct.pack(f'{text_size}s', text_encoded)
+
+            self.pos += text_size
+            self.buffer += _data
+
+    def buffer_reset(self):
         self.pos = 0
-        
-    def seek(self, pos: int):
-        self.pos = pos
-        
-    def clear(self):
-        self.data_array = b''
-        self.pos = 0
-    
-    def get_data_array(self):
-        return self.data_array
 
 
-'''
-buffer = MyBuffer()
-buffer.write_u16(256)
-#buffer.write_u8(0)
-buffer.seek(0)
-print(buffer.read_u16())
-'''
+
+
 
 
 #texto = "Hello"
