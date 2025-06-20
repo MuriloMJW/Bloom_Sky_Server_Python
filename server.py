@@ -15,8 +15,8 @@ server_ip = "0.0.0.0"
 debug_send_packet = True
 debug_received_packet = True
 
-#server_port = 9913
-server_port = 8080
+server_port = 9913
+#server_port = 8080
 
 # Lista de conexões
 sockets = []
@@ -24,14 +24,25 @@ players = {}
 
 new_id = 0
 
-class network(IntEnum):
+class Network(IntEnum):
+    # Client -> Server
     REQUEST_CONNECT = 0
-    player_establish = auto()
-    player_connected = auto()
-    player_joined = auto()
-    player_disconnect = auto()
-    player_move = auto()
-    player_chat = auto()
+    
+    REQUEST_PLAYER_MOVE = 1
+    
+    CHAT_MESSAGE = 100
+
+    # Server -> Client
+    PLAYER_CONNECTED = 100
+    OTHER_PLAYER_CONNECTED = 101
+    OTHER_PLAYER_DISCONNECTED = 102
+    
+    PLAYER_MOVED = 103          
+    OTHER_PLAYER_MOVED = 104
+    
+    CHAT_RECEIVED = 200
+    
+    
 
 
 class Player():
@@ -49,7 +60,23 @@ class Player():
     def set_y(self, y):
         self.y = y
 
-
+async def send_packet(packet : MyBuffer, player : Player):
+    if(debug_send_packet):
+        print("==SENDING PACKET==")
+        print(packet.get_data_array())
+        print(list(packet.get_data_array()))
+    
+    await player.websocket.send(packet.get_data_array())
+    
+async def send_packet_to_all(packet : MyBuffer):
+    # Avisa a todos os jogadores o chat
+    for other_player in players.values():
+        await send_packet(packet, other_player)
+        
+async def send_packet_to_all_except(packet, player_except):
+    for other_player in players.values():
+        if(other_player.id != player_except.id):
+            await send_packet(packet, other_player)
 
 async def received_packets(packet, id):
 
@@ -65,7 +92,7 @@ async def received_packets(packet, id):
 
     match msgid:
 
-        case network.REQUEST_CONNECT:
+        case Network.REQUEST_CONNECT:
             
             
             
@@ -77,17 +104,17 @@ async def received_packets(packet, id):
             
             # 1) Manda o Player Connect e sua posição para o novo Player
             buffer.clear()
-            buffer.write_u8(network.player_connected)
-            buffer.write_u8(player.id)
+            buffer.write_u8(Network.PLAYER_CONNECTED)
             buffer.write_u16(player.x)
             buffer.write_u16(player.y)
+            buffer.write_u8(player.id)
             #buffer.write_string(str(player.id))
             
-            await send_packet(player, buffer)
+            await send_packet(buffer, player)
             
             # Avisa TODOS que um novo Player conectou e sua posição
             buffer.clear()
-            buffer.write_u8(network.player_joined)
+            buffer.write_u8(Network.OTHER_PLAYER_CONNECTED)
             buffer.write_u16(player.x)
             buffer.write_u16(player.y)
             buffer.write_u8(player.id)
@@ -99,40 +126,45 @@ async def received_packets(packet, id):
                 if other_player.id != player.id: # Não avisa a si mesmo
 
                     buffer.clear()
-                    buffer.write_u8(network.player_joined)
+                    buffer.write_u8(Network.OTHER_PLAYER_CONNECTED)
                     buffer.write_u16(other_player.x)
                     buffer.write_u16(other_player.y)
                     buffer.write_u8(other_player.id)
 
-                    await send_packet(player, buffer)
+                    await send_packet(buffer, player)
 
 
-        case network.player_move:
-            print("===Player Move===")
-
+        case Network.REQUEST_PLAYER_MOVE:
+            print("===REQUEST PLAYER MOVE===")
+            player = players[id]
+            
             move_x = buffer.read_u16()
             move_y = buffer.read_u16()
 
-            player = players[id]
+            
+            # Atualiza no dict a posição
+            players[id].set_x(move_x)
+            players[id].set_y(move_y)
 
             buffer.clear()
-            buffer.write_u8(network.player_move)
+            buffer.write_u8(Network.PLAYER_MOVED)
             buffer.write_u16(move_x)
             buffer.write_u16(move_y)
             buffer.write_u8(player.id)
 
-            #await send_packet(player, buffer)
+            await send_packet(buffer, player)
 
-            # Após o pacote enviado, atualiza no dict a posição
-            players[id].set_x(move_x)
-            players[id].set_y(move_y)
+            
 
             # Avisa todos (exceto eu mesmo) que me movi
+            buffer.clear()
+            buffer.write_u8(Network.OTHER_PLAYER_MOVED)
+            buffer.write_u16(move_x)
+            buffer.write_u16(move_y)
+            buffer.write_u8(player.id)
             await send_packet_to_all_except(buffer, player)
-
-            #Colocar aqui o X e Y do player
         
-        case network.player_chat:
+        case Network.CHAT_MESSAGE:
             print("===Player Chat===")
 
 
@@ -144,30 +176,14 @@ async def received_packets(packet, id):
             print(chat_text)
 
             buffer.clear()
-            buffer.write_u8(network.player_chat)
+            buffer.write_u8(Network.CHAT_MESSAGE)
             buffer.write_string(chat_text)
             
             await send_packet_to_all(buffer)
                     
 
 
-async def send_packet(player, packet : MyBuffer):
-    if(debug_send_packet):
-        print("==SENDING PACKET==")
-        print(packet.get_data_array())
-        print(list(packet.get_data_array()))
-    
-    await player.websocket.send(packet.get_data_array())
-    
-async def send_packet_to_all(packet : MyBuffer):
-    # Avisa a todos os jogadores o chat
-    for other_player in players.values():
-        await send_packet(other_player, packet)
-        
-async def send_packet_to_all_except(packet, player_except):
-    for other_player in players.values():
-        if(other_player.id != player_except.id):
-            await send_packet(other_player, packet)
+
     
 
 #Couroutine executada com a conexão recebida
@@ -200,9 +216,9 @@ async def handler(websocket):
             player_removed_id = player.id
             del players[player_removed_id]
             
-            buffer.clear()
+            buffer = MyBuffer()
 
-            buffer.write_u8(network.player_disconnect)
+            buffer.write_u8(Network.OTHER_PLAYER_DISCONNECTED)
             buffer.write_u8(player_removed_id)
 
             await send_packet_to_all(buffer)
