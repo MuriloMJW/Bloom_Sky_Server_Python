@@ -70,8 +70,8 @@ async def received_packets(packet, id):
             
             
             # Altera no dictionary
-            players[id].set_x(400)
-            players[id].set_y(400)
+            players[id].set_x(100)
+            players[id].set_y(100)
 
             player = players[id]
             
@@ -81,6 +81,7 @@ async def received_packets(packet, id):
             buffer.write_u16(player.x)
             buffer.write_u16(player.y)
             #buffer.write_string(str(player.id))
+            
             await send_packet(player, buffer)
             
             # Avisa TODOS que um novo Player conectou e sua posição
@@ -119,12 +120,13 @@ async def received_packets(packet, id):
             buffer.write_u16(move_y)
             buffer.write_u8(player.id)
 
-            await send_packet(player, buffer)
+            #await send_packet(player, buffer)
 
             # Após o pacote enviado, atualiza no dict a posição
             players[id].set_x(move_x)
             players[id].set_y(move_y)
 
+            # Avisa todos (exceto eu mesmo) que me movi
             await send_packet_to_all_except(buffer, player)
 
             #Colocar aqui o X e Y do player
@@ -206,14 +208,14 @@ async def handler(websocket):
             # Avisar aos outros jogadores a desconexão
             for other_player in players.values():
 
-                    buffer_ = bytearray()
-                    myBufferWrite = MyBuffer(buffer_)
+                    buffer.clear()
 
-                    myBufferWrite.buffer_write(buffer.BUFFER_U8, network.player_disconnect)
-                    myBufferWrite.buffer_write(buffer.BUFFER_U8, player_removed_id)
+                    buffer.write_u8(network.player_disconnect)
+                    buffer.write_u8(player_removed_id)
 
                     #print("Todos sobre quem entrou: Avisando o player ", p.id, " sobre o ", player.id)
-                    await other_player.websocket.send(buffer_)
+                    #await other_player.websocket.send(buffer_)
+                    await send_packet(other_player, buffer)
 
 
     print("Connection finished")
