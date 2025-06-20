@@ -201,21 +201,17 @@ async def handler(websocket):
             await received_packets(packet, player.id)
 
     except websockets.exceptions.ConnectionClosed as e:
-            print("Erro: Jogador desconectado. ", e)
+            
+            print(f"Player ID {player.id} disconnected", e)
             player_removed_id = player.id
             del players[player_removed_id]
+            
+            buffer.clear()
 
-            # Avisar aos outros jogadores a desconexão
-            for other_player in players.values():
+            buffer.write_u8(network.player_disconnect)
+            buffer.write_u8(player_removed_id)
 
-                    buffer.clear()
-
-                    buffer.write_u8(network.player_disconnect)
-                    buffer.write_u8(player_removed_id)
-
-                    #print("Todos sobre quem entrou: Avisando o player ", p.id, " sobre o ", player.id)
-                    #await other_player.websocket.send(buffer_)
-                    await send_packet(other_player, buffer)
+            await send_packet_to_all(buffer)
 
 
     print("Connection finished")
