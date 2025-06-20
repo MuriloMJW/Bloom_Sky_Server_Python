@@ -3,7 +3,7 @@ import websockets
 import buffer
 import traceback
 from buffer import MyBuffer
-from enum import IntEnum
+from enum import IntEnum, auto
 
 # Ip onde o servidor ouve
 
@@ -22,15 +22,16 @@ server_port = 8080
 sockets = []
 players = {}
 
-id = 0
+new_id = 0
 
 class network(IntEnum):
-    player_establish = 0
-    player_connect = 1
-    player_joined = 2
-    player_disconnect = 3
-    player_move = 4
-    player_chat = 5
+    REQUEST_CONNECT = 0
+    player_establish = auto()
+    player_connected = auto()
+    player_joined = auto()
+    player_disconnect = auto()
+    player_move = auto()
+    player_chat = auto()
 
 
 class Player():
@@ -64,8 +65,7 @@ async def received_packets(packet, id):
 
     match msgid:
 
-        case network.player_establish:
-            print("===Player Establish===")
+        case network.REQUEST_CONNECT:
             
             
             
@@ -77,7 +77,8 @@ async def received_packets(packet, id):
             
             # 1) Manda o Player Connect e sua posição para o novo Player
             buffer.clear()
-            buffer.write_u8(network.player_connect)
+            buffer.write_u8(network.player_connected)
+            buffer.write_u8(player.id)
             buffer.write_u16(player.x)
             buffer.write_u16(player.y)
             #buffer.write_string(str(player.id))
@@ -171,25 +172,18 @@ async def send_packet_to_all_except(packet, player_except):
 
 #Couroutine executada com a conexão recebida
 async def handler(websocket):
-    global id
 
     print("Connection received: ", websocket.remote_address)
+    
+    global new_id
 
-    sockets.append(websocket)
 
-
-    player = Player(websocket, id)
+    player = Player(websocket, new_id)
 
     # Acrescenta o player no dictionary. id: player
-    players[id] = player
+    players[new_id] = player
 
-    id += 1
-    
-    buffer = MyBuffer()
-    buffer.write_u8(network.player_establish)
-    buffer.write_u8(player.id)
-    
-    await send_packet(player, buffer)
+    new_id += 1
 
     try:
         while True: #Fica ouvindo as mensagens recebidas de cada websocket para sempre, mantendo a conexão ligada
