@@ -30,6 +30,8 @@ class Network(IntEnum):
     
     REQUEST_PLAYER_MOVE = 1
     
+    REQUEST_PLAYER_SHOOT = 2
+    
     CHAT_MESSAGE = 100
 
     # Server -> Client
@@ -39,6 +41,9 @@ class Network(IntEnum):
     
     PLAYER_MOVED = 103          
     OTHER_PLAYER_MOVED = 104
+    
+    PLAYER_SHOOT = 105
+    OTHER_PLAYER_SHOOT = 106
     
     CHAT_RECEIVED = 200
     
@@ -163,6 +168,26 @@ async def received_packets(packet, id):
             buffer.write_u16(move_y)
             buffer.write_u8(player.id)
             await send_packet_to_all_except(buffer, player)
+        
+        case Network.REQUEST_PLAYER_SHOOT:
+            print("===REQUEST PLAYER SHOOT===")
+            player = players[id]
+            
+            buffer.clear()
+            buffer.write_u8(Network.PLAYER_SHOOT)
+            
+            await send_packet(buffer, player)
+            
+            
+            # Avisa todos (exceto eu mesmo) que atirei
+            buffer.clear()
+            buffer.write_u8(Network.OTHER_PLAYER_SHOOT)
+            buffer.write_u8(player.id)
+            await send_packet_to_all_except(buffer, player)
+            
+            
+            
+            
         
         case Network.CHAT_MESSAGE:
             print("===Player Chat===")
