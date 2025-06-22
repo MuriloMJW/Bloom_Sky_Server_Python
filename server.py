@@ -31,6 +31,8 @@ class Network(IntEnum):
     REQUEST_PLAYER_MOVE = 1
     
     REQUEST_PLAYER_SHOOT = 2
+    REQUEST_PLAYER_DAMAGE = 3
+    REQUEST_PLAYER_RESPAWN = 4
     
     CHAT_MESSAGE = 100
 
@@ -44,6 +46,9 @@ class Network(IntEnum):
     
     PLAYER_SHOOT = 105
     OTHER_PLAYER_SHOOT = 106
+    #PLAYER_DAMAGED = 107
+    PLAYER_KILLED = 108
+    PLAYER_RESPAWNED = 109
     
     CHAT_RECEIVED = 200
     
@@ -64,6 +69,9 @@ class Player():
 
     def set_y(self, y):
         self.y = y
+        
+    def set_isAlive(self, isAlive):
+        self.isAlive = isAlive
 
 async def send_packet(packet : MyBuffer, player : Player):
     if(debug_send_packet):
@@ -104,6 +112,7 @@ async def received_packets(packet, id):
             # Altera no dictionary
             players[id].set_x(100)
             players[id].set_y(100)
+            players[id].isAlive = True
 
             player = players[id]
             
@@ -139,7 +148,7 @@ async def received_packets(packet, id):
                     await send_packet(buffer, player)
 
 
-        case Network.REQUEST_PLAYER_MOVE:
+        case Network.REQUEST_PLAYER_MOVE:#
             print("===REQUEST PLAYER MOVE===")
             player = players[id]
             
@@ -185,12 +194,54 @@ async def received_packets(packet, id):
             buffer.write_u8(player.id)
             await send_packet_to_all_except(buffer, player)
             
+        
+        case Network.REQUEST_PLAYER_DAMAGE:
+            print("===REQUEST PLAYER DAMAGE===")
+            killed_id = buffer.read_u8()
+            killer_id = buffer.read_u8()
+            damage = buffer.read_u8()
+            
+            #print("KILLED ID: ", killed_id)
+            players[killed_id].isAlive = False
+            
+            buffer.clear()
+            buffer.write_u8(Network.PLAYER_KILLED)
+            buffer.write_u8(killed_id)
+            await send_packet_to_all(buffer)
             
             
+            
+            chat_text = "< PLAYER "+str(killer_id)+" MATOU O PLAYER "+str(killed_id)+" >"
+
+            print(chat_text)
+
+            buffer.clear()
+            buffer.write_u8(Network.CHAT_RECEIVED)
+            buffer.write_string(chat_text)
+            
+            await send_packet_to_all(buffer)
+            
+        case Network.REQUEST_PLAYER_RESPAWN:
+            print("===REQUEST PLAYER RESPAWN===")
+            
+            respawned_id = buffer.read_u8()
+            respawn_position_x = 200
+            respawn_position_y = 200
+            
+            players[respawned_id].isAlive = True
+            
+            buffer.clear()
+            buffer.write_u8(Network.PLAYER_RESPAWNED)
+            buffer.write_u8(respawned_id)
+            buffer.write_u16(respawn_position_x)
+            buffer.write_u16(respawn_position_y)
+            await send_packet_to_all(buffer)
+            
+           
             
         
         case Network.CHAT_MESSAGE:
-            print("===Player Chat===")
+            print("===CHAT MESSAGE===")
 
 
             player = players[id]
@@ -201,10 +252,14 @@ async def received_packets(packet, id):
             print(chat_text)
 
             buffer.clear()
-            buffer.write_u8(Network.CHAT_MESSAGE)
+            buffer.write_u8(Network.CHAT_RECEIVED)
             buffer.write_string(chat_text)
             
             await send_packet_to_all(buffer)
+        
+        case _:
+            print("UNKNOWN PACKET ID: ", msgid)
+            
                     
 
 
