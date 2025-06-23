@@ -67,7 +67,7 @@ class MyBuffer:
     def write_string(self, data):
         text_encoded = data.encode('ascii')
         string_size = len(text_encoded)
-        #_data = struct.pack(f'{text_size}s', text_encoded) com 0 no final
+        #_data = struct.pack(f'{text_size}sx', text_encoded) com 0 no final
         self.data_array += struct.pack(f'{string_size}s', text_encoded)
 
         self.pos += string_size

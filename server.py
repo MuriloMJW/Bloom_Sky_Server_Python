@@ -31,6 +31,7 @@ class Network(IntEnum):
     REQUEST_PLAYER_SHOOT = 2
     REQUEST_PLAYER_DAMAGE = 3
     REQUEST_PLAYER_RESPAWN = 4
+    REQUEST_PLAYER_CHANGE_TEAM = 5
     
     CHAT_MESSAGE = 100
 
@@ -47,6 +48,7 @@ class Network(IntEnum):
     PLAYER_DAMAGED = 107
     PLAYER_KILLED = 108
     PLAYER_RESPAWNED = 109
+    PLAYER_CHANGED_TEAM = 110
     
     CHAT_RECEIVED = 200
     
@@ -66,7 +68,8 @@ class Player:
         
         self._id = id
         
-        self._team = "SKY" if self._id % 2 == 0 else "BLOOM"
+        self._team_id = id%2
+        self._team = "SKY" if self._team_id == 0 else "BLOOM"
         
         self._x = SPAWN_POSITIONS[self.team]["x"]
         self._y = SPAWN_POSITIONS[self.team]["y"]
@@ -88,6 +91,10 @@ class Player:
     @property
     def id(self) -> int:
         return self._id
+    
+    @property
+    def team_id(self):
+        return self._team_id
         
     @property
     def team(self):
@@ -117,7 +124,7 @@ class Player:
         
     @y.setter
     def y(self, new_y):
-        self._y = new_y  
+        self._y = new_y
         
     def __str__(self):
         status = "Vivo" if self._is_alive else "Morto"
@@ -144,6 +151,11 @@ class Player:
         self._is_alive = True
         self._x = SPAWN_POSITIONS[self.team]["x"]
         self._y = SPAWN_POSITIONS[self.team]["y"]
+        
+    def change_team_id(self):
+        self._team = "BLOOM" if self._team_id == 0 else "SKY"
+        self._team_id = 0 if self._team_id == 1 else 1
+        
         
        
      
@@ -193,6 +205,9 @@ async def received_packets(packet, player):
             
         case Network.REQUEST_PLAYER_RESPAWN:
             await handle_request_player_respawn(buffer, player)
+            
+        case Network.REQUEST_PLAYER_CHANGE_TEAM:
+            await handle_request_player_change_team(buffer, player)
         
         case Network.CHAT_MESSAGE:
             await _handle_chat_message(buffer, player)
@@ -212,22 +227,25 @@ async def handle_request_connect(buffer, player):
     # 1) Manda o Player Connect e sua posição para o novo Player
     buffer.clear()
     buffer.write_u8(Network.PLAYER_CONNECTED)
+    buffer.write_u8(player.id)
     buffer.write_u16(player.x)
     buffer.write_u16(player.y)
-    buffer.write_u8(player.id)
-    buffer.write_string(player.team)
+    buffer.write_u8(player.team_id)
+    #buffer.write_string(player.team)
     buffer.write_u8(player.is_alive)
     buffer.write_u8(player.hp)
+    
     
     await send_packet(buffer, player)
     
     # Avisa TODOS que um novo Player conectou e sua posição
     buffer.clear()
     buffer.write_u8(Network.OTHER_PLAYER_CONNECTED)
+    buffer.write_u8(player.id)
     buffer.write_u16(player.x)
     buffer.write_u16(player.y)
-    buffer.write_u8(player.id)
-    buffer.write_string(player.team)
+    buffer.write_u8(player.team_id)
+    #buffer.write_string(player.team)
     buffer.write_u8(player.is_alive)
     buffer.write_u8(player.hp)
     await send_packet_to_all_except(buffer, player)
@@ -240,10 +258,11 @@ async def handle_request_connect(buffer, player):
 
             buffer.clear()
             buffer.write_u8(Network.OTHER_PLAYER_CONNECTED)
+            buffer.write_u8(other_player.id)
             buffer.write_u16(other_player.x)
             buffer.write_u16(other_player.y)
-            buffer.write_u8(other_player.id)
-            buffer.write_string(other_player.team)
+            buffer.write_u8(other_player.team_id)
+            #buffer.write_string(other_player.team)
             buffer.write_u8(other_player.is_alive)
             buffer.write_u8(other_player.hp)
 
@@ -310,6 +329,11 @@ async def handle_request_player_damage(buffer, player):
         buffer.write_u8(player_damager_id)
         buffer.write_u8(damage)
         await send_packet_to_all(buffer)
+        
+        chat_text = f"[color=blue]< PLAYER {player_damager_id} DANOU O PLAYER {player_damaged_id} COM {damage} DE DANO >[/color]"
+        await send_chat_message_to_all(chat_text)
+        print(chat_text)
+        
     else: # Se o player morreu, avisa que ele foi morto
         buffer.write_u8(Network.PLAYER_KILLED)
         buffer.write_u8(player_damaged_id)
@@ -337,7 +361,20 @@ async def handle_request_player_respawn(buffer, player):
     buffer.write_u8(player.is_alive)
     buffer.write_u8(player.hp)
     await send_packet_to_all(buffer)
-        
+
+async def handle_request_player_change_team(buffer, player):
+    print("===REQUEST PLAYER CHANGE TEAM===")
+    
+    player.change_team_id()
+    
+    buffer.clear()
+    buffer.write_u8(Network.PLAYER_CHANGED_TEAM)
+    buffer.write_u8(player.id)
+    await send_packet_to_all(buffer)
+    
+    
+    
+
 async def _handle_chat_message(buffer, player):
     print("===CHAT MESSAGE===")
 
