@@ -2,9 +2,11 @@ import struct
 from io import BytesIO
 
 # Tipos de dados suportados para leitura\BUFFER_U8 = 1  # Leitura de um único byte (unsigned 8-bit)
-BUFFER_U8 = 1  # Leitura de 1 byte
+BUFFER_U8 = 1   # Leitura de 1 byte
 BUFFER_U16 = 2  # Leitura de 2 bytes
-BUFFER_STRING = 3  # Leitura de strings terminadas por byte nulo (0x00)
+BUFFER_U32 = 4  # Leitura de 4 bytes
+BUFFER_U64 = 8  # Leitura de 8 bytes
+BUFFER_STRING = 9  # Leitura de strings terminadas por byte nulo (0x00)
 
 # Ideia de herdar da byte array e mudar tudo para self
 
@@ -32,6 +34,18 @@ class MyBuffer:
         (data,) = struct.unpack_from('H', self.data_array, self.pos)
         self.pos += BUFFER_U16  # Atualiza posição de leitura
         return data
+    
+    def read_u32(self):
+        # Lê 4 bytes e converte para inteiro
+        (data,) = struct.unpack_from('I', self.data_array, self.pos)
+        self.pos += BUFFER_U32  # Atualiza posição de leitura
+        return data
+    
+    def read_u64(self):
+        # Lê 8 bytes e converte para inteiro
+        (data,) = struct.unpack_from('Q', self.data_array, self.pos)
+        self.pos += BUFFER_U64  # Atualiza posição de leitura
+        return data
         
     def read_string(self):
         
@@ -39,19 +53,21 @@ class MyBuffer:
         
         # Procura a posição do byte nulo, a partir do da posição de leitura atual
         # end é posição do buffer do byte nulo, ou seja, onde termina a string
-        end = self.data_array.find(0, start)
+        end = self.data_array.find(0, self.pos)
         
         # Tamanho da string é a posição do caractere final menos a posição do inicial
-        string_size =  end - start
+        #string_size =  end - start
         
         # Recebe uma tupla de 1 elemento do tipo bytes, esse elemento possui tamanho string_size
-        (text_encoded,) = struct.unpack_from(f'{string_size}s', self.data_array, start)
+        #(text_encoded,) = struct.unpack_from(f'{string_size}s', self.data_array, start)
         # Converte em string ascii
+        #text_decoded = text_encoded.decode('ascii')
+        
+        # Alternativa com slice: 
+        text_encoded = self.data_array[start:end]
         text_decoded = text_encoded.decode('ascii')
         
-        # Alternativa com slice: text_encoded = self.buffer[start:end]
-        
-        self.pos += string_size
+        self.pos = end + 1  # Atualiza posição de leitura (pula o byte nulo)
         
         return text_decoded
         
@@ -63,12 +79,22 @@ class MyBuffer:
         data_bytes = struct.pack("H", data)
         self.data_array += data_bytes
         self.pos += BUFFER_U16
+    
+    def write_u32(self, data):
+        data_bytes = struct.pack("I", data)
+        self.data_array += data_bytes
+        self.pos += BUFFER_U32
+        
+    def write_u64(self, data):
+        data_bytes = struct.pack("Q", data)
+        self.data_array += data_bytes
+        self.pos += BUFFER_U64
         
     def write_string(self, data):
         text_encoded = data.encode('ascii')
         string_size = len(text_encoded)
         #_data = struct.pack(f'{text_size}sx', text_encoded) com 0 no final
-        self.data_array += struct.pack(f'{string_size}s', text_encoded)
+        self.data_array += struct.pack(f'{string_size}sx', text_encoded)
 
         self.pos += string_size
         
@@ -93,6 +119,8 @@ buffer.write_u16(256)
 buffer.seek(0)
 print(buffer.read_u16())
 '''
+
+
 
 
 #texto = "Hello"

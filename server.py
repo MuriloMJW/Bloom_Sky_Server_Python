@@ -3,6 +3,7 @@ import websockets
 import traceback
 from buffer import MyBuffer
 from enum import IntEnum, auto
+import aioconsole
 
 # Ip onde o servidor ouve
 
@@ -34,6 +35,7 @@ class Network(IntEnum):
     REQUEST_PLAYER_CHANGE_TEAM = 5
     
     CHAT_MESSAGE = 100
+    PING = 254
 
     # Server -> Client
     PLAYER_CONNECTED = 100
@@ -51,6 +53,8 @@ class Network(IntEnum):
     PLAYER_CHANGED_TEAM = 110
     
     CHAT_RECEIVED = 200
+    
+    PONG = 255
     
     
     
@@ -156,7 +160,6 @@ class Player:
         self._team = "BLOOM" if self._team_id == 0 else "SKY"
         self._team_id = 0 if self._team_id == 1 else 1
         
-        
        
      
 async def send_packet(packet : MyBuffer, player : Player):
@@ -211,6 +214,9 @@ async def received_packets(packet, player):
         
         case Network.CHAT_MESSAGE:
             await _handle_chat_message(buffer, player)
+            
+        case Network.PING:
+            await _handle_ping(buffer, player)
         
         case _:
             print("UNKNOWN PACKET ID: ", msgid)
@@ -231,7 +237,7 @@ async def handle_request_connect(buffer, player):
     buffer.write_u16(player.x)
     buffer.write_u16(player.y)
     buffer.write_u8(player.team_id)
-    #buffer.write_string(player.team)
+    buffer.write_string(player.team)
     buffer.write_u8(player.is_alive)
     buffer.write_u8(player.hp)
     
@@ -245,7 +251,7 @@ async def handle_request_connect(buffer, player):
     buffer.write_u16(player.x)
     buffer.write_u16(player.y)
     buffer.write_u8(player.team_id)
-    #buffer.write_string(player.team)
+    buffer.write_string(player.team)
     buffer.write_u8(player.is_alive)
     buffer.write_u8(player.hp)
     await send_packet_to_all_except(buffer, player)
@@ -262,7 +268,7 @@ async def handle_request_connect(buffer, player):
             buffer.write_u16(other_player.x)
             buffer.write_u16(other_player.y)
             buffer.write_u8(other_player.team_id)
-            #buffer.write_string(other_player.team)
+            buffer.write_string(other_player.team)
             buffer.write_u8(other_player.is_alive)
             buffer.write_u8(other_player.hp)
 
@@ -328,11 +334,12 @@ async def handle_request_player_damage(buffer, player):
         buffer.write_u8(player_damaged_id)
         buffer.write_u8(player_damager_id)
         buffer.write_u8(damage)
+        buffer.write_u8(player.hp) 
         await send_packet_to_all(buffer)
         
-        chat_text = f"[color=blue]< PLAYER {player_damager_id} DANOU O PLAYER {player_damaged_id} COM {damage} DE DANO >[/color]"
-        await send_chat_message_to_all(chat_text)
-        print(chat_text)
+        #chat_text = f"[color=blue]< PLAYER {player_damager_id} DANOU O PLAYER {player_damaged_id} COM {damage} DE DANO >[/color]"
+        #await send_chat_message_to_all(chat_text)
+        #print(chat_text)
         
     else: # Se o player morreu, avisa que ele foi morto
         buffer.write_u8(Network.PLAYER_KILLED)
@@ -371,9 +378,6 @@ async def handle_request_player_change_team(buffer, player):
     buffer.write_u8(Network.PLAYER_CHANGED_TEAM)
     buffer.write_u8(player.id)
     await send_packet_to_all(buffer)
-    
-    
-    
 
 async def _handle_chat_message(buffer, player):
     print("===CHAT MESSAGE===")
@@ -388,6 +392,18 @@ async def _handle_chat_message(buffer, player):
     buffer.write_string(chat_text)
     
     await send_packet_to_all(buffer)
+    
+async def _handle_ping(buffer, player):
+    print("===PING===")
+    
+    time_stamp = buffer.read_u64()  # Lê o PING enviado pelo cliente
+    
+    buffer.clear()
+    buffer.write_u8(Network.PONG)
+    buffer.write_u64(time_stamp)
+    
+    await send_packet(buffer, player)
+    
 
 async def send_chat_message_to_all(chat_text):
     buffer = MyBuffer()
@@ -436,13 +452,23 @@ async def handler(websocket):
 
     print("Connection finished")
 
+async def read_input():
+    while True:
+        msg = await aioconsole.ainput()
+        await send_chat_message_to_all(msg)
+        await asyncio.sleep(0.1)
+    
+
 async def main():
     global server_ip
     global server_port
-
+    
     print(f"Listening on {server_ip}:{server_port}...")
     # Websockets.serve, internamente chama um await handler(websocket) 
     # e passa magicamente o socket para ele
+    
+    input_task = asyncio.create_task(read_input())
+    
     async with websockets.serve(handler, server_ip, server_port): 
         # Roda pra sempre, quando recebe uma conexão, chama o evento handler(websocket)
         await asyncio.Future() 
