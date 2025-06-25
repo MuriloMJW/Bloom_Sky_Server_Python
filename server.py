@@ -33,6 +33,7 @@ class Network(IntEnum):
     REQUEST_PLAYER_DAMAGE = 3
     REQUEST_PLAYER_RESPAWN = 4
     REQUEST_PLAYER_CHANGE_TEAM = 5
+    REQUEST_PLAYER_SONIC = 6
     
     CHAT_MESSAGE = 100
     PING = 254
@@ -51,6 +52,7 @@ class Network(IntEnum):
     PLAYER_KILLED = 108
     PLAYER_RESPAWNED = 109
     PLAYER_CHANGED_TEAM = 110
+    PLAYER_SONICKED = 111
     
     CHAT_RECEIVED = 200
     
@@ -211,6 +213,9 @@ async def received_packets(packet, player):
             
         case Network.REQUEST_PLAYER_CHANGE_TEAM:
             await handle_request_player_change_team(buffer, player)
+            
+        case Network.REQUEST_PLAYER_SONIC:
+            await handle_request_player_sonic(buffer, player)
         
         case Network.CHAT_MESSAGE:
             await _handle_chat_message(buffer, player)
@@ -381,6 +386,16 @@ async def handle_request_player_change_team(buffer, player):
     buffer.write_u8(Network.PLAYER_CHANGED_TEAM)
     buffer.write_u8(player.id)
     await send_packet_to_all(buffer)
+
+async def handle_request_player_sonic(buffer, player):
+    print("===REQUEST PLAYER SONIC===")
+
+    
+    buffer.clear()
+    buffer.write_u8(Network.PLAYER_SONICKED)
+    buffer.write_u8(player.id)
+    await send_packet_to_all(buffer)
+
 
 async def _handle_chat_message(buffer, player):
     print("===CHAT MESSAGE===")
