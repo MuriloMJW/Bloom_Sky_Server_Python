@@ -345,6 +345,9 @@ async def handle_request_player_damage(buffer, player):
         buffer.write_u8(Network.PLAYER_KILLED)
         buffer.write_u8(player_damaged_id)
         buffer.write_u8(player_damager_id)
+        buffer.write_u8(damage)
+        buffer.write_u8(player.is_alive) 
+        buffer.write_u8(player.hp) 
         await send_packet_to_all(buffer)
         
         chat_text = f"[color=red]< PLAYER {player_damager_id} MATOU O PLAYER {player_damaged_id} >[/color]"
