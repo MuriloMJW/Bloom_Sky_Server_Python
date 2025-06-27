@@ -12,7 +12,7 @@ server_ip = "0.0.0.0"
 # Hamachi
 #server_ip = "25.3.218.182"
 
-debug_send_packet = False
+debug_send_packet = True
 debug_received_packet = False
 
 server_port = 9913
@@ -23,6 +23,7 @@ players = {}
 friendly_fire_enabled = False
 
 new_id = 0
+
 
 class Network(IntEnum):
     # Client -> Server
@@ -57,6 +58,7 @@ class Network(IntEnum):
     PLAYER_SONICKED = 111
 
     PLAYER_UPDATED = 112 
+    PLAYER_SETUP = 113
     
     RANKING_UPDATED = 199
     CHAT_RECEIVED = 200
@@ -67,6 +69,18 @@ SPAWN_POSITIONS = {
     "SKY": {"x": 100, "y": 100},
     "BLOOM": {"x": 100, "y": 500}
 }
+
+player_bitmask_layout = [
+    # stat       bitmask, data_type
+    ('x',            1 << 0, 'u16'),
+    ('y',            1 << 1, 'u16'),
+    ('is_alive',     1 << 2, 'u8'),
+    ('hp',           1 << 3, 'u8'),
+    ('team_id',      1 << 4, 'u8'),
+    ('team',         1 << 5, 'string'),
+    ('total_kills',  1 << 6, 'u16')
+    
+    ]
 
 class Player:
 
@@ -292,22 +306,84 @@ async def received_packets(packet, player):
 
 
 # ----- [ PEDIDOS DO CLIENT] ----- #
+async def send_player_setup(buffer, player):
+    print("===SENDING PLAYER UPDATED TO ALL===")
+
+    print(str(player))
+    
+
+    
+    # Lista de tuplas ex ('u16', player.x)
+    payload_to_write = []
+    
+    # Criar a mascara e a lista de payloads
+    #mask = 0
+    for stat, bitmask, data_type in player_bitmask_layout:
+        payload_to_write.append( (data_type, getattr(player, stat)) )
+            
+    #player._changed_stats.clear()  # Limpa o conjunto de stats alterados
+    
+    buffer.clear()
+    buffer.write_u8(Network.PLAYER_CONNECTED)
+    buffer.write_u8(Network.PLAYER_CONNECTED)
+    buffer.write_u8(player.id)
+    
+    buffer_other = MyBuffer()
+    buffer_other.clear()
+    buffer_other.write_u8(Network.PLAYER_CONNECTED)
+    buffer_other.write_u8(Network.OTHER_PLAYER_CONNECTED)
+    buffer_other.write_u8(player.id)
+
+    #buffer.write_u8(mask)
+            
+    for data_type, player_attr in payload_to_write:
+        if data_type == 'u8':
+            buffer.write_u8(player_attr)
+            buffer_other.write_u8(player_attr)
+        elif data_type == 'u16':
+            buffer.write_u16(player_attr)
+            buffer_other.write_u16(player_attr)
+        elif data_type == 'string':
+            buffer.write_string(player_attr)
+            buffer_other.write_string(player_attr)
+
+
+    await send_packet(buffer, player)
+    await send_packet_to_all_except(buffer_other, player)
+    
+    # Avisa ao novo Player que conectou a posição de TODOS
+    for other_player in players.values():
+        if other_player.id == player.id: # Não avisa a si mesmo
+            continue
+        
+        other_payload_to_write = []
+        
+        for stat, bitmask, data_type in player_bitmask_layout:
+            other_payload_to_write.append( (data_type, getattr(other_player, stat)) )
+
+        buffer_other.clear()
+        buffer_other.write_u8(Network.PLAYER_CONNECTED)
+        buffer_other.write_u8(Network.OTHER_PLAYER_CONNECTED)
+        buffer_other.write_u8(other_player.id)
+            
+        for data_type, other_player_attr in other_payload_to_write:
+            if data_type == 'u8':
+                buffer_other.write_u8(other_player_attr)
+            elif data_type == 'u16':
+                buffer_other.write_u16(other_player_attr)
+            elif data_type == 'string':
+                buffer_other.write_string(other_player_attr)
+
+        await send_packet(buffer_other, player)
+
+
+
 async def send_player_updated(buffer, player):
     print("===SENDING PLAYER UPDATED TO ALL===")
 
     print(str(player))
     
-    player_bitmask_layout = [
-    # stat       bitmask, data_type
-    ('x',            1 << 0, 'u16'),
-    ('y',            1 << 1, 'u16'),
-    ('is_alive',     1 << 2, 'u8'),
-    ('hp',           1 << 3, 'u8'),
-    ('team_id',      1 << 4, 'u8'),
-    ('team',         1 << 5, 'string'),
-    ('total_kills',  1 << 6, 'u16')
-    
-    ]
+
     
     # Lista de tuplas ex ('u16', player.x)
     payload_to_write = []
@@ -344,6 +420,7 @@ async def handle_request_connect(buffer, player):
     print(str(players[player.id]))
 
     # 1) Manda o Player Connect e sua posição para o novo Player
+    '''
     buffer.clear()
     buffer.write_u8(Network.PLAYER_CONNECTED)
     buffer.write_u8(player.id)
@@ -353,10 +430,10 @@ async def handle_request_connect(buffer, player):
     buffer.write_string(player.team)
     buffer.write_u8(player.is_alive)
     buffer.write_u8(player.hp)
-
-
-    await send_packet(buffer, player)
-
+'''
+    await send_player_setup(buffer, player)
+    #await send_packet(buffer, player)
+    '''
     # Avisa TODOS que um novo Player conectou e sua posição
     buffer.clear()
     buffer.write_u8(Network.OTHER_PLAYER_CONNECTED)
@@ -386,6 +463,7 @@ async def handle_request_connect(buffer, player):
             buffer.write_u8(other_player.hp)
 
             await send_packet(buffer, player)
+    '''
 
 async def handle_request_player_move(buffer, player):
     print("===REQUEST PLAYER MOVE===")
@@ -423,10 +501,10 @@ async def handle_request_player_damage(buffer, player):
     
     
     
-    if(players[player_damaged_id].team_id == players[player_damager_id].team_id 
-       and not friendly_fire_enabled 
-       and player_damaged_id != player_damager_id):
-        return # Se for do mesmo time e o friendly fire não está ativado e não for auto dano, não faz nada
+    if (player_damaged_id != player_damager_id
+    and players[player_damaged_id].team_id == players[player_damager_id].team_id
+    and not friendly_fire_enabled):
+        return  # Se for do mesmo time e o friendly fire não está ativado, não faz nada
         
     players[player_damaged_id].take_damage(damage) # Aplica o dano ao player
 
@@ -434,7 +512,8 @@ async def handle_request_player_damage(buffer, player):
 
     buffer.clear()
 
-    if players[player_damaged_id].is_alive == False: # Se o player morreu
+    # Se o player morreu
+    if players[player_damaged_id].is_alive == False: 
         
         # Se foi suicídio
         if(player_damaged_id == player_damager_id):
@@ -446,8 +525,8 @@ async def handle_request_player_damage(buffer, player):
         
         players[player_damager_id].total_kills += 1
         
-        await send_player_updated(buffer, players[player_damaged_id])                     # Envia o player danificado atualizado
-        await send_player_updated(buffer, players[player_damager_id]) # Envia o player que causou o dano atualizado
+        await send_player_updated(buffer, players[player_damaged_id])  # Envia o player danificado atualizado
+        await send_player_updated(buffer, players[player_damager_id])  # Envia o player que causou o dano atualizado
         
         chat_text =  f"[color=red][PLAYER {player_damager_id} MATOU O PLAYER {player_damaged_id}] [/color] "
         #chat_text += f"[KILLS: {players[player_damager_id].total_kills} | "
@@ -512,13 +591,13 @@ async def _handle_chat_message(buffer, player):
     if message_received == "RAT ATTACK":
  
         for p in players.values():
-            buffer2 = MyBuffer()
-            buffer2.clear()
-            buffer2.write_u8(p.id)
-            buffer2.write_u8(player.id)
-            buffer2.write_u8(100)
-            buffer2.seek_start()
-            await handle_request_player_damage(buffer2, player) # Dano de 1 HP para todos os players quando alguém envia uma mensagem no chat
+            buffer_rat = MyBuffer()
+            buffer_rat.clear()
+            buffer_rat.write_u8(p.id)
+            buffer_rat.write_u8(player.id)
+            buffer_rat.write_u8(100)
+            buffer_rat.seek_start()
+            await handle_request_player_damage(buffer_rat, player) # Dano de 1 HP para todos os players quando alguém envia uma mensagem no chat
         
         message = "RAT ATTACK\n"*10
         message += f"PLAYER {player.id} MANDOU OS RATO MATAR VCS TUDO"
