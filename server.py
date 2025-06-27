@@ -309,7 +309,7 @@ async def send_player_updated(buffer, player):
     
     ]
     
-    # Lista de tuplas ex ('u16', player.x)
+    # Lista de tuplas ex ('u16', player.x) a
     payload_to_write = []
     
     # Criar a mascara e a lista de payloads
