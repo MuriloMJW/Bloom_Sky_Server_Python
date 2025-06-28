@@ -2,6 +2,7 @@ import asyncio
 import websockets
 import traceback
 from buffer import MyBuffer
+from player import Player, player_bitmask_layout
 from enum import IntEnum, auto
 import aioconsole
 
@@ -65,182 +66,7 @@ class Network(IntEnum):
     PONG = 255
 
 
-SPAWN_POSITIONS = {
-    "SKY": {"x": 100, "y": 100},
-    "BLOOM": {"x": 100, "y": 500}
-}
-
-player_bitmask_layout = [
-    # stat       bitmask, data_type
-    ('x',            1 << 0, 'u16'),
-    ('y',            1 << 1, 'u16'),
-    ('is_alive',     1 << 2, 'u8'),
-    ('hp',           1 << 3, 'u8'),
-    ('team_id',      1 << 4, 'u8'),
-    ('team',         1 << 5, 'string'),
-    ('total_kills',  1 << 6, 'u16')
-    
-    ]
-
-class Player:
-
-    def __init__(self, websocket, id):
-
-        self._websocket = websocket
-        self._ip = websocket.remote_address
-
-        self._id = id
-
-        self._team_id = id%2
-        self._team = "SKY" if self._team_id == 0 else "BLOOM"
-
-        self._x = SPAWN_POSITIONS[self.team]["x"]
-        self._y = SPAWN_POSITIONS[self.team]["y"]
-
-        self._is_alive = True
-        self._hp = 100  # HP inicial do jogador
-
-
-
-        #self.is_sonic
-
-        self._total_kills = 0
-
-        # --- Atributos exclusivos do Player no servidor --- #
-        self.total_deaths = 0
-        self._changed_stats = set() # Conjunto para armazenar quais stats foram alterados
-
-    # --- Getters & Setters --- #
-
-    # --- ID, Websocket e IP --- #
-    @property
-    def websocket(self):    
-        return self._websocket
-
-    @property
-    def ip(self):
-        return self._ip
-
-    @property
-    def id(self) -> int:
-        return self._id
-
-    # --- X e Y --- #
-    @property
-    def x(self):
-        return self._x
-
-    @x.setter
-    def x(self, new_x):
-        if (new_x != self._x):
-            self._x = new_x
-            self._changed_stats.add("x")
-
-    @property
-    def y(self):
-        return self._y
-
-    @y.setter
-    def y(self, new_y):
-        if (new_y != self._y):
-            self._y = new_y
-            self._changed_stats.add("y")
-
-
-    # --- is_alive e hp --- #
-    @property
-    def is_alive(self):
-        return self._is_alive
-
-    @is_alive.setter
-    def is_alive(self, new_is_alive):
-        if (new_is_alive != self._is_alive):
-            self._is_alive = new_is_alive
-            self._changed_stats.add("is_alive")
-
-    @property
-    def hp(self):
-        return self._hp
-
-    @hp.setter
-    def hp(self, new_hp):
-        if (new_hp != self._hp):
-            self._hp = new_hp
-            self._changed_stats.add("hp")
-
-    # --- Team ID e Team --- #
-    @property
-    def team_id(self):
-        return self._team_id
-
-    @team_id.setter
-    def team_id(self, new_team_id):
-        if (new_team_id != self._team_id):
-            self._team_id = new_team_id
-            self._changed_stats.add("team_id")
-
-    @property
-    def team(self):
-        return self._team
-
-    @team.setter
-    def team(self, new_team):
-        if (new_team != self._team):
-            self._team = new_team
-            self._changed_stats.add("team")
-
-    # --- Total Kills e Total Deaths --- #
-    @property
-    def total_kills(self):
-        return self._total_kills
-
-    @total_kills.setter
-    def total_kills(self, new_total_kills):
-        if (new_total_kills != self._total_kills):
-            self._total_kills = new_total_kills
-            self._changed_stats.add("total_kills")
-
-    # --- String Representation --- #
-
-    def __str__(self):
-        status = "Vivo" if self._is_alive else "Morto"
-        return (
-            f"Jogador {self._id} | "
-            f"Time: {self._team} | "
-            f"Posição: (x={self._x}, y={self._y}) | "
-            f"Status: {status}"
-            f" | HP: {self._hp} | "
-            f"Kills: {self._total_kills} | "
-            f"Deaths: {self.total_deaths} | "
-            f"IP: {self._ip[0]}:{self._ip[1]}"
-            f" | Team ID: {self._team_id}"
-            f" | Changed Stats: {self._changed_stats}"
-        )
-
-    # --- Métodos --- #
-
-    def take_damage(self, damage):
-        if self.is_alive:
-            self.hp -= damage
-            if self.hp <= 0:
-                self.kill()
-
-    def kill(self):
-        self.hp = 0
-        self.is_alive = False
-        self.total_deaths += 1
-
-    def respawn(self):
-        self.hp = 100
-        self.is_alive = True
-        self.x = SPAWN_POSITIONS[self.team]["x"]
-        self.y = SPAWN_POSITIONS[self.team]["y"]
-
-    def change_team_id(self):
-        self.team = "BLOOM" if self._team_id == 0 else "SKY"
-        self.team_id = 0 if self._team_id == 1 else 1
-
-
+# ----- [ MÉTODOS DE TRATAMENTO DE PACKETS ] ----- #
 
 async def send_packet(packet : MyBuffer, player : Player):
     if(debug_send_packet):
@@ -260,6 +86,20 @@ async def send_packet_to_all_except(packet, player_except):
         if(other_player.id != player_except.id):
             await send_packet(packet, other_player)
 
+async def write_payload_to_buffer(buffer, payload_to_write):
+    
+    for data_type, player_attribute in payload_to_write:
+        if data_type == 'u8':
+            buffer.write_u8(player_attribute)
+        elif data_type == 'u16':
+            buffer.write_u16(player_attribute)
+        elif data_type == 'u32':
+            buffer.write_u32(player_attribute)
+        elif data_type == 'u64':
+            buffer.write_u64(player_attribute)
+        elif data_type == 'string':
+            buffer.write_string(player_attribute)
+   
 async def received_packets(packet, player):
 
     buffer = MyBuffer(packet)
@@ -277,7 +117,7 @@ async def received_packets(packet, player):
         case Network.REQUEST_CONNECT:
             await handle_request_connect(buffer, player)
 
-        case Network.REQUEST_PLAYER_MOVE:#
+        case Network.REQUEST_PLAYER_MOVE:
             await handle_request_player_move(buffer, player)
 
         case Network.REQUEST_PLAYER_SHOOT:
@@ -304,173 +144,106 @@ async def received_packets(packet, player):
         case _:
             print("UNKNOWN PACKET ID: ", msgid)
 
-
 # ----- [ PEDIDOS DO CLIENT] ----- #
-async def send_player_setup(buffer, player):
+
+async def handle_request_connect(buffer, player):
     print("===SENDING PLAYER UPDATED TO ALL===")
 
     print(str(player))
     
-
     
     # Lista de tuplas ex ('u16', player.x)
     payload_to_write = []
     
-    # Criar a mascara e a lista de payloads
-    #mask = 0
-    for stat, bitmask, data_type in player_bitmask_layout:
-        payload_to_write.append( (data_type, getattr(player, stat)) )
-            
-    #player._changed_stats.clear()  # Limpa o conjunto de stats alterados
+    # Monta a lista do payload com cada atributo e seu valor 
+    for attribute, _, data_type in player_bitmask_layout:
+        payload_to_write.append( (data_type, getattr(player, attribute)) )
+        # Resultado = ("u8", pegar atributo (classe, valor do atributo))
+        # Ex:       [ ("u8", 100), ("u16", 500) ... ]
     
+    # Montagem do Header (evento, quem conectou (eu ou outro player), player.id)
     buffer.clear()
     buffer.write_u8(Network.PLAYER_CONNECTED)
-    buffer.write_u8(Network.PLAYER_CONNECTED)
+    buffer.write_u8(Network.PLAYER_CONNECTED) 
     buffer.write_u8(player.id)
     
+    # Monta o buffer com payload
+    await write_payload_to_buffer(buffer, payload_to_write)
+    
+    # Avisa a si mesmo que foi conectado
+    await send_packet(buffer, player)
+    
+    # Avisar todos os jogadores que eu me conectei
     buffer_other = MyBuffer()
     buffer_other.clear()
     buffer_other.write_u8(Network.PLAYER_CONNECTED)
-    buffer_other.write_u8(Network.OTHER_PLAYER_CONNECTED)
+    buffer_other.write_u8(Network.OTHER_PLAYER_CONNECTED) # Me envia como other player
     buffer_other.write_u8(player.id)
 
-    #buffer.write_u8(mask)
-            
-    for data_type, player_attr in payload_to_write:
-        if data_type == 'u8':
-            buffer.write_u8(player_attr)
-            buffer_other.write_u8(player_attr)
-        elif data_type == 'u16':
-            buffer.write_u16(player_attr)
-            buffer_other.write_u16(player_attr)
-        elif data_type == 'string':
-            buffer.write_string(player_attr)
-            buffer_other.write_string(player_attr)
+    # Monta o buffer com payload
+    await write_payload_to_buffer(buffer_other, payload_to_write)
 
-
-    await send_packet(buffer, player)
+    # Avisa todos os jogadores que me conectei
     await send_packet_to_all_except(buffer_other, player)
     
-    # Avisa ao novo Player que conectou a posição de TODOS
+    # Avisa ao novo Player que conectou o dado de TODOS
     for other_player in players.values():
         if other_player.id == player.id: # Não avisa a si mesmo
             continue
         
         other_payload_to_write = []
         
-        for stat, bitmask, data_type in player_bitmask_layout:
-            other_payload_to_write.append( (data_type, getattr(other_player, stat)) )
+        for attribute, _, data_type in player_bitmask_layout:
+            other_payload_to_write.append( (data_type, getattr(other_player, attribute)) )
 
         buffer_other.clear()
         buffer_other.write_u8(Network.PLAYER_CONNECTED)
         buffer_other.write_u8(Network.OTHER_PLAYER_CONNECTED)
         buffer_other.write_u8(other_player.id)
-            
-        for data_type, other_player_attr in other_payload_to_write:
-            if data_type == 'u8':
-                buffer_other.write_u8(other_player_attr)
-            elif data_type == 'u16':
-                buffer_other.write_u16(other_player_attr)
-            elif data_type == 'string':
-                buffer_other.write_string(other_player_attr)
+        
+        await write_payload_to_buffer(buffer_other, other_payload_to_write)
 
         await send_packet(buffer_other, player)
-
-
 
 async def send_player_updated(buffer, player):
     print("===SENDING PLAYER UPDATED TO ALL===")
 
     print(str(player))
     
-
     
     # Lista de tuplas ex ('u16', player.x) a
     payload_to_write = []
     
     # Criar a mascara e a lista de payloads
     mask = 0
-    for stat, bitmask, data_type in player_bitmask_layout:
-        if stat in player._changed_stats: # 
+    for attribute, bitmask, data_type in player_bitmask_layout:
+        if attribute in player._changed_attributes: # 
             mask |= bitmask
-            payload_to_write.append( (data_type, getattr(player, stat)) )
+            payload_to_write.append( (data_type, getattr(player, attribute)) )
             
-    player._changed_stats.clear()  # Limpa o conjunto de stats alterados
+    player._changed_attributes.clear()  # Limpa o conjunto de stats alterados
     
+    # Header
     buffer.clear()
     buffer.write_u8(Network.PLAYER_UPDATED)
     buffer.write_u8(player.id)
     buffer.write_u8(mask)
-            
-    for data_type, player_attr in payload_to_write:
-        if data_type == 'u8':
-            buffer.write_u8(player_attr)
-        elif data_type == 'u16':
-            buffer.write_u16(player_attr)
-        elif data_type == 'string':
-            buffer.write_string(player_attr)
+    
+    # Payload
+    await write_payload_to_buffer(buffer, payload_to_write)
 
     await send_packet_to_all(buffer)
-
-
-async def handle_request_connect(buffer, player):
-    print("===REQUEST CONNECT===")
-
-    print(str(player))
-    print(str(players[player.id]))
-
-    # 1) Manda o Player Connect e sua posição para o novo Player
-    '''
-    buffer.clear()
-    buffer.write_u8(Network.PLAYER_CONNECTED)
-    buffer.write_u8(player.id)
-    buffer.write_u16(player.x)
-    buffer.write_u16(player.y)
-    buffer.write_u8(player.team_id)
-    buffer.write_string(player.team)
-    buffer.write_u8(player.is_alive)
-    buffer.write_u8(player.hp)
-'''
-    await send_player_setup(buffer, player)
-    #await send_packet(buffer, player)
-    '''
-    # Avisa TODOS que um novo Player conectou e sua posição
-    buffer.clear()
-    buffer.write_u8(Network.OTHER_PLAYER_CONNECTED)
-    buffer.write_u8(player.id)
-    buffer.write_u16(player.x)
-    buffer.write_u16(player.y)
-    buffer.write_u8(player.team_id)
-    buffer.write_string(player.team)
-    buffer.write_u8(player.is_alive)
-    buffer.write_u8(player.hp)
-    await send_packet_to_all_except(buffer, player)
-
-    await send_chat_message_to_all(f"[color=green]< PLAYER {player.id} CONECTOU! >[/color]")
-    # Avisa ao novo Player que conectou a posição de TODOS
-
-    for other_player in players.values():
-        if other_player.id != player.id: # Não avisa a si mesmo
-
-            buffer.clear()
-            buffer.write_u8(Network.OTHER_PLAYER_CONNECTED)
-            buffer.write_u8(other_player.id)
-            buffer.write_u16(other_player.x)
-            buffer.write_u16(other_player.y)
-            buffer.write_u8(other_player.team_id)
-            buffer.write_string(other_player.team)
-            buffer.write_u8(other_player.is_alive)
-            buffer.write_u8(other_player.hp)
-
-            await send_packet(buffer, player)
-    '''
-
+ 
 async def handle_request_player_move(buffer, player):
     print("===REQUEST PLAYER MOVE===")
 
     # Lê a posição do player
     new_x = buffer.read_u16()
     new_y = buffer.read_u16()
+    
+    # Se clicou fora da area de jogo
+    if(new_y > 500):
+        return
 
     # Atualiza a posição do player
     player.x = new_x
@@ -483,7 +256,6 @@ async def handle_request_player_move(buffer, player):
 
     #await send_packet(buffer, player)
 
-
 async def handle_request_player_shoot(buffer, player):
     print("===REQUEST PLAYER SHOOT===")
     buffer.clear()
@@ -491,7 +263,6 @@ async def handle_request_player_shoot(buffer, player):
     buffer.write_u8(player.id)
 
     await send_packet_to_all(buffer)
-
 
 async def handle_request_player_damage(buffer, player):
     print("===REQUEST PLAYER DAMAGE===")
@@ -501,11 +272,10 @@ async def handle_request_player_damage(buffer, player):
     
     
     
-    if (player_damaged_id != player_damager_id
-    and players[player_damaged_id].team_id == players[player_damager_id].team_id
-    and not friendly_fire_enabled):
-        return  # Se for do mesmo time e o friendly fire não está ativado, não faz nada
-        
+    if (player_damaged_id != player_damager_id                                   # Se quem causou dano foi outro player E
+    and players[player_damaged_id].team_id == players[player_damager_id].team_id # Não são do mesmo time E
+    and not friendly_fire_enabled):                                              # O friendly fire está desativado
+        return                                                                   # Não faz nada  
     players[player_damaged_id].take_damage(damage) # Aplica o dano ao player
 
     chat_text = ''
@@ -539,8 +309,6 @@ async def handle_request_player_damage(buffer, player):
         
         
         await send_player_updated(buffer, players[player_damaged_id])   # Envia o player danificado atualizado
-        
-   
 
 async def handle_request_player_respawn(buffer, player):
     print("===REQUEST PLAYER RESPAWN===")
@@ -567,12 +335,16 @@ async def handle_request_player_sonic(buffer, player):
     buffer.write_u8(player.id)
     await send_packet_to_all(buffer)
 
-
 async def _handle_chat_message(buffer, player):
     print("===CHAT MESSAGE===")
 
     message_received = buffer.read_string()
 
+    if message_received[0] == "/":
+        await commands(message_received, player)
+        return
+
+    
     
     chat_text = "["+str(player.id)+"] "
 
@@ -604,9 +376,8 @@ async def _handle_chat_message(buffer, player):
             
         #await send_chat_message_to_all(message) # Envia mensagem de chat para todos os players
 
-
 async def _handle_ping(buffer, player):
-    print("===PING===")
+    #print("===PING===")
 
     time_stamp = buffer.read_u64()  # Lê o PING enviado pelo cliente
 
@@ -616,6 +387,13 @@ async def _handle_ping(buffer, player):
 
     await send_packet(buffer, player)
 
+# ----- [ MÉTODOS DO SERVIDOR ] ----- #
+async def send_chat_message_to_player(chat_text, player):
+    buffer = MyBuffer()
+    buffer.write_u8(Network.CHAT_RECEIVED)
+    buffer.write_string(chat_text)
+
+    await send_packet(buffer, player) 
 
 async def send_chat_message_to_all(chat_text):
     buffer = MyBuffer()
@@ -643,7 +421,67 @@ async def send_ranking_updated():
     buffer.write_string(ranking_text)
     await send_packet_to_all(buffer)
 
+async def toggle_friendly_fire():
+    global friendly_fire_enabled
+    friendly_fire_enabled = not friendly_fire_enabled
+
+
+#  ----- [ COMANDOS] ----- #
+
+async def commands(command_string, player):
     
+    # Se a string ta vazia ou possui menos de 2 caracteres
+    if not command_string or len(command_string) < 2:
+        return
+    
+    
+    parts = command_string[1:].lower().split()
+    command_name = parts[0]
+    args = parts[1:]
+    
+    
+    if command_name == "friendlyfire" or command_name == "ff":
+            await command_friendly_fire(args, player)
+    elif command_name == "playerlist" or command_name == "pl":
+            await command_playerlist(args, player)
+    else:
+        await send_chat_message_to_player("Invalid command", player)
+
+            
+async def command_friendly_fire(args, player):
+    args_needed = 0
+    
+    global friendly_fire_enabled
+    
+    if(len(args) != args_needed):
+        await send_chat_message_to_player("Invalid command", player)
+        return
+    
+    await toggle_friendly_fire()
+    
+    if friendly_fire_enabled:
+        await send_chat_message_to_all("Friendly fire enabled")
+    else:
+        await send_chat_message_to_all("Friendly fire disabled")
+       
+async def command_playerlist(args, player):
+    args_needed = 0
+    
+    if(len(args) != args_needed):
+        await send_chat_message_to_player("Invalid command", player)
+        return
+    
+    chat_message = f"Players online:"
+    for p in players.values():
+        chat_message += f"\n{str(p)}"
+    
+    await send_chat_message_to_all(chat_message)
+
+
+
+
+
+
 #Couroutine executada com a conexão recebida
 async def handler(websocket):
 
@@ -689,7 +527,6 @@ async def read_input():
         await send_chat_message_to_all(msg)
         await asyncio.sleep(0.1)
 
-
 async def main():
     global server_ip
     global server_port
@@ -703,7 +540,6 @@ async def main():
     async with websockets.serve(handler, server_ip, server_port): 
         # Roda pra sempre, quando recebe uma conexão, chama o evento handler(websocket)
         await asyncio.Future() 
-
 
 asyncio.run(main())
 

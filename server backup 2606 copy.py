@@ -364,6 +364,7 @@ async def send_player_updated(buffer, player):
         buffer.write_string(player.team)
     if(mask & BIT_TOTAL_KILLS):
         buffer.write_u8(player.total_kills)
+        
 
     player._changed_stats.clear()  # Limpa o conjunto de stats alterados
 

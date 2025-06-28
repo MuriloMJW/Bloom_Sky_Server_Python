@@ -65,7 +65,7 @@ class MyBuffer:
         
         # Alternativa com slice: 
         text_encoded = self.data_array[start:end]
-        text_decoded = text_encoded.decode('ascii')
+        text_decoded = text_encoded.decode('utf-8')
         
         self.pos = end + 1  # Atualiza posição de leitura (pula o byte nulo)
         
@@ -91,7 +91,7 @@ class MyBuffer:
         self.pos += BUFFER_U64
         
     def write_string(self, data):
-        text_encoded = data.encode('ascii')
+        text_encoded = data.encode('utf-8')
         string_size = len(text_encoded)
         #_data = struct.pack(f'{text_size}sx', text_encoded) com 0 no final
         self.data_array += struct.pack(f'{string_size}sx', text_encoded)
