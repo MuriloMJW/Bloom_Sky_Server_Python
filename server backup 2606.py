@@ -313,6 +313,7 @@ async def send_player_updated(buffer, player):
     ('team_id', 1 << 4, 'u8'),
     ('team', 1 << 5, 'string'),
     ('total_kills', 1 << 6, 'u8')
+    
     ]
     
     mask = 0

@@ -5,15 +5,17 @@ SPAWN_POSITIONS = {
 }
 
 player_bitmask_layout = [
-    # attr       bitmask, data_type
-    ('x',            1 << 0, 'u16'),
-    ('y',            1 << 1, 'u16'),
-    ('is_alive',     1 << 2, 'u8'),
-    ('hp',           1 << 3, 'u8'),
-    ('team_id',      1 << 4, 'u8'),
-    ('team',         1 << 5, 'string'),
-    ('total_kills',  1 << 6, 'u16')
-    
+    # attr          bitmask, data_type
+    ('x',              1 << 0, 'float'),
+    ('y',              1 << 1, 'float'),
+    ('is_alive',       1 << 2, 'u8'),
+    ('hp',             1 << 3, 'u8'),
+    ('team_id',        1 << 4, 'u8'),
+    ('team',           1 << 5, 'string'),
+    ('total_kills',    1 << 6, 'u16'),
+    ('speed',          1 << 7, 'float'),
+    ('shoot_cooldown', 1 << 8, 'float')
+
     ]
 
 class Player:
@@ -31,6 +33,10 @@ class Player:
         self._x = SPAWN_POSITIONS[self.team]["x"]
         self._y = SPAWN_POSITIONS[self.team]["y"]
 
+        self._input_direction_x = 0
+        self._input_direction_y = 0
+
+
         self._is_alive = True
         self._hp = 100  # HP inicial do jogador
 
@@ -40,8 +46,13 @@ class Player:
 
         self._total_kills = 0
 
+        self._speed = 500.0
+
+        self._shoot_cooldown = 0.1
+
         # --- Atributos exclusivos do Player no servidor --- #
         self.total_deaths = 0
+
         self._changed_attributes = set() # Conjunto para armazenar quais stats foram alterados
 
     # --- Getters & Setters --- #
@@ -68,6 +79,7 @@ class Player:
     def x(self, new_x):
         if (new_x != self._x):
             self._x = new_x
+            print("###################################################################### PQP")
             self._changed_attributes.add("x")
 
     @property
@@ -79,6 +91,27 @@ class Player:
         if (new_y != self._y):
             self._y = new_y
             self._changed_attributes.add("y")
+
+
+    @property
+    def input_direction_x(self):
+        return self._input_direction_x
+
+    @input_direction_x.setter
+    def input_direction_x(self, new_input_direction_x):
+        if (new_input_direction_x != self._input_direction_x):
+            self._input_direction_x = new_input_direction_x
+            self._changed_attributes.add("input_direction_x")
+
+    @property
+    def input_direction_y(self):
+        return self._input_direction_y
+
+    @input_direction_y.setter
+    def input_direction_y(self, new_input_direction_y):
+        if (new_input_direction_y != self._input_direction_y):
+            self._input_direction_y = new_input_direction_y
+            self._changed_attributes.add("input_direction_y")
 
 
     # --- is_alive e hp --- #
@@ -134,6 +167,30 @@ class Player:
             self._total_kills = new_total_kills
             self._changed_attributes.add("total_kills")
 
+
+    # --- Speed --- #
+    @property
+    def speed(self):
+        return self._speed
+
+    @speed.setter
+    def speed(self, new_speed):
+        if (new_speed != self._speed):
+            self._speed = new_speed
+            self._changed_attributes.add("speed")
+
+    # --- Shoot --- #
+    @property
+    def shoot_cooldown(self):
+        return self._shoot_cooldown
+
+    @shoot_cooldown.setter
+    def shoot_cooldown(self, new_shoot_cooldown):
+        if (new_shoot_cooldown != self._shoot_cooldown):
+            self._shoot_cooldown = new_shoot_cooldown
+            self._changed_attributes.add("shoot_cooldown")
+
+
     # --- String Representation --- #
 
     def __str__(self):
@@ -149,6 +206,8 @@ class Player:
             f"IP: {self._ip[0]}:{self._ip[1]}"
             f" | Team ID: {self._team_id}"
             f" | Changed Stats: {self._changed_attributes}"
+            f" | Speed: {self._speed}"
+            f" | Shoot Cooldown: {self._shoot_cooldown}"
         )
 
     # --- Métodos do Player --- #

@@ -5,7 +5,7 @@ from buffer import MyBuffer
 from player import Player, player_bitmask_layout
 from enum import IntEnum, auto
 import aioconsole
-import time
+import pygame
 
 # Ip onde o servidor ouve
 
@@ -14,11 +14,11 @@ server_ip = "0.0.0.0"
 # Hamachi
 #server_ip = "25.3.218.182"
 
-debug_send_packet = False
+debug_send_packet = True
 debug_received_packet = False
 
-#server_port = 9913
-server_port = 8080
+server_port = 9913
+#server_port = 8080
 
 # Lista de conexões
 players = {}
@@ -26,38 +26,11 @@ new_id = 0
 
 CONNECTION_LOCK = asyncio.Lock()
 DISCONNECTION_LOCK = asyncio.Lock()
-TEST_LOCK = asyncio.Lock()
-
-# --- Constantes do loop do jogo no servidor --- #
-
-TICK_RATE = 30 # 20 atualizações por segundo
-DELTA = 1.0/TICK_RATE # O tempo fixo de cada tick
 
 
 friendly_fire_enabled = False
+GAME_RESOLUTION = (1280, 720)
 
-async def game_loop():
-    i=0
-    while True:
-        tick_start_time = time.time()
-        # INICIO
-        
-        for p in players.values():
-            
-            moved = False
-            
-            if "x" in p._changed_attributes or "y" in p._changed_attributes:
-                await send_player_updated(p)
-        
-        
-
-        
-        # FIM
-        tick_end_time = time.time()
-        sleep_duration = DELTA - (tick_end_time - tick_start_time)
-        if sleep_duration > 0:
-            await asyncio.sleep(sleep_duration)
-        
 
 
 class Network(IntEnum):
@@ -99,6 +72,39 @@ class Network(IntEnum):
     CHAT_RECEIVED = 200
     PONG = 255
 
+class ServerVisualizer:
+    def __init__(self, resolution):
+        pygame.init()
+        self.screen = pygame.display.set_mode(resolution)
+        self.resolution = resolution
+        self.running = True
+        self.clock = pygame.time.Clock()
+        self.colors = {
+            0: (255, 0, 0),
+            1: (0, 0, 255)
+        }
+        
+    def handle_events(self):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.running = False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    self.running = False
+    
+    def draw(self, players_dict):
+        self.screen.fill((0, 0, 0))
+        
+        for player_id, player in players_dict.items():
+
+            pygame.draw.rect(self.screen, self.colors[player.team_id], (player.x, player.y, 40, 40))
+            
+        
+        pygame.display.flip()
+    
+        
+    
+
 
 # ----- [ MÉTODOS DE TRATAMENTO DE PACKETS ] ----- #
 
@@ -107,6 +113,7 @@ async def send_packet(packet : MyBuffer, player : Player):
     
     if player.websocket.state != connection_state.OPEN:
         print(f"==FAILED TO SEND PACKET TO {player.id} STATE: {player.websocket.state.name}===")
+        print(f"==FAILED TO SEND PACKET TO {player.id} ==")
         return
     
     if(debug_send_packet):
@@ -137,14 +144,10 @@ async def write_payload_to_buffer(buffer, payload_to_write):
             buffer.write_u8(player_attribute)
         elif data_type == 'u16':
             buffer.write_u16(player_attribute)
-        elif data_type == 's16':
-            buffer.write_s16(player_attribute)
         elif data_type == 'u32':
             buffer.write_u32(player_attribute)
         elif data_type == 'u64':
             buffer.write_u64(player_attribute)
-        elif data_type == 'float':
-            buffer.write_float(player_attribute)
         elif data_type == 'string':
             buffer.write_string(player_attribute)
    
@@ -280,7 +283,7 @@ async def send_player_updated(player):
     buffer.clear()
     buffer.write_u8(Network.PLAYER_UPDATED)
     buffer.write_u8(player.id)
-    buffer.write_u16(mask)
+    buffer.write_u8(mask)
     
     # Payload
     await write_payload_to_buffer(buffer, payload_to_write)
@@ -291,25 +294,21 @@ async def handle_request_player_move(buffer, player):
     print("===REQUEST PLAYER MOVE===")
 
     # Lê a posição do player
-    new_x = buffer.read_float()
-    new_y = buffer.read_float()
-    print(f"@@@@@@@@@@@@@@ {new_x} {new_y}")
-    # Se clicou fora da area de jogo
+    new_x = buffer.read_u16()
+    new_y = buffer.read_u16()
     
+    # Se clicou fora da area de jogo
+    if(new_y > 500):
+        return
 
     # Atualiza a posição do player
-    player.x += int(new_x * 10)
-    player.y += int(new_y * 10)
-    
-    if(player.y > 500):
-        player.y = 500
-    
-    print(f'{player.x} {player.y} @@@@@@@@@@@@@@@@')
+    player.x = new_x
+    player.y = new_y
 
     print(str(player))
 
 
-    #await send_player_updated(player)
+    await send_player_updated(player)
 
     #await send_packet(buffer, player)
 
@@ -334,9 +333,6 @@ async def handle_request_player_damage(buffer, player):
     and not friendly_fire_enabled):                                              # O friendly fire está desativado
         return                                                                   # Não faz nada  
     
-    if (players[player_damaged_id].is_alive == False):
-        return
-        
     await damage_id(player_damaged_id, damage)  # Aplica o dano ao player
 
     chat_text = ''
@@ -828,13 +824,31 @@ async def main():
     # e passa magicamente o socket para ele
 
     input_task = asyncio.create_task(read_input())
-    
-    game_loop_task = asyncio.create_task(game_loop())
-    
 
-    async with websockets.serve(handler, server_ip, server_port): 
-        # Roda pra sempre, quando recebe uma conexão, chama o evento handler(websocket)
-        await asyncio.Future() 
+    server_task = websockets.serve(handler, server_ip, server_port) 
+
+    server = await server_task
+    
+    visualizer = ServerVisualizer(GAME_RESOLUTION)
+    try:
+        while visualizer.running:
+            
+            visualizer.handle_events()
+            
+            visualizer.draw(players)
+
+            await asyncio.sleep(1/60)
+    finally:
+        print("Fechando o servidor...")
+        server.close()
+        await server.wait_closed()
+        pygame.quit()
+        print("Servidor e visualizador fechados")
+
+pygame.init()
+
+screen = pygame.display.set_mode((800, 600))
+
 
 asyncio.run(main())
 

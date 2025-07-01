@@ -17,8 +17,8 @@ server_ip = "0.0.0.0"
 debug_send_packet = False
 debug_received_packet = False
 
-#server_port = 9913
-server_port = 8080
+server_port = 9913
+#server_port = 8080
 
 # Lista de conexões
 players = {}

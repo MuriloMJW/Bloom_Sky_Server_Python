@@ -4,8 +4,10 @@ from io import BytesIO
 # Tipos de dados suportados para leitura\BUFFER_U8 = 1  # Leitura de um único byte (unsigned 8-bit)
 BUFFER_U8 = 1   # Leitura de 1 byte
 BUFFER_U16 = 2  # Leitura de 2 bytes
+BUFFER_S16 = 2  # Leitura de 2 bytes (signed)
 BUFFER_U32 = 4  # Leitura de 4 bytes
 BUFFER_U64 = 8  # Leitura de 8 bytes
+BUFFER_FLOAT = 4  # Leitura de 4 bytes (float)
 BUFFER_STRING = 9  # Leitura de strings terminadas por byte nulo (0x00)
 
 # Ideia de herdar da byte array e mudar tudo para self
@@ -35,6 +37,12 @@ class MyBuffer:
         self.pos += BUFFER_U16  # Atualiza posição de leitura
         return data
     
+    def read_s16(self):
+        # Lê 2 bytes e converte para inteiro
+        (data,) = struct.unpack_from('h', self.data_array, self.pos)
+        self.pos += BUFFER_S16  # Atualiza posição de leitura
+        return data
+    
     def read_u32(self):
         # Lê 4 bytes e converte para inteiro
         (data,) = struct.unpack_from('I', self.data_array, self.pos)
@@ -45,6 +53,12 @@ class MyBuffer:
         # Lê 8 bytes e converte para inteiro
         (data,) = struct.unpack_from('Q', self.data_array, self.pos)
         self.pos += BUFFER_U64  # Atualiza posição de leitura
+        return data
+    
+    def read_float(self):
+        # Lê 4 bytes e converte para float
+        (data,) = struct.unpack_from('f', self.data_array, self.pos)
+        self.pos += BUFFER_FLOAT  # Atualiza posição de leitura
         return data
         
     def read_string(self):
@@ -79,6 +93,11 @@ class MyBuffer:
         data_bytes = struct.pack("H", data)
         self.data_array += data_bytes
         self.pos += BUFFER_U16
+        
+    def write_s16(self, data):
+        data_bytes = struct.pack("h", data)
+        self.data_array += data_bytes
+        self.pos += BUFFER_S16
     
     def write_u32(self, data):
         data_bytes = struct.pack("I", data)
@@ -89,6 +108,11 @@ class MyBuffer:
         data_bytes = struct.pack("Q", data)
         self.data_array += data_bytes
         self.pos += BUFFER_U64
+        
+    def write_float(self, data):
+        data_bytes = struct.pack("f", data)
+        self.data_array += data_bytes
+        self.pos += BUFFER_FLOAT
         
     def write_string(self, data):
         text_encoded = data.encode('utf-8')
