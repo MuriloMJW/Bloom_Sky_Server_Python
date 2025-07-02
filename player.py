@@ -46,7 +46,7 @@ class Player:
 
         self._total_kills = 0
 
-        self._speed = 500.0
+        self._speed = 500
 
         self._shoot_cooldown = 0.1
 
@@ -79,7 +79,6 @@ class Player:
     def x(self, new_x):
         if (new_x != self._x):
             self._x = new_x
-            print("###################################################################### PQP")
             self._changed_attributes.add("x")
 
     @property
