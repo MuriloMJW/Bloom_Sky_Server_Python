@@ -1,33 +1,16 @@
-
-SPAWN_POSITIONS = {
-    "SKY": {"x": 100, "y": 100},
-    "BLOOM": {"x": 100, "y": 500}
-}
-
-player_bitmask_layout = [
-    # attr          bitmask, data_type
-    ('x',              1 << 0, 'float'),
-    ('y',              1 << 1, 'float'),
-    ('is_alive',       1 << 2, 'u8'),
-    ('hp',             1 << 3, 'u8'),
-    ('team_id',        1 << 4, 'u8'),
-    ('team',           1 << 5, 'string'),
-    ('total_kills',    1 << 6, 'u16'),
-    ('speed',          1 << 7, 'float'),
-    ('shoot_cooldown', 1 << 8, 'float')
-
-    ]
+import websockets
 
 class Player:
 
     def __init__(self, websocket, id):
 
         self._websocket = websocket
-        self._ip = websocket.remote_address
+
+        self._ip = str(self._get_real_ip(websocket))
 
         self._id = id
 
-        self._team_id = id%2
+        self._team_id = id % 2
         self._team = "SKY" if self._team_id == 0 else "BLOOM"
 
         self._x = SPAWN_POSITIONS[self.team]["x"]
@@ -36,11 +19,8 @@ class Player:
         self._input_direction_x = 0
         self._input_direction_y = 0
 
-
         self._is_alive = True
         self._hp = 100  # HP inicial do jogador
-
-
 
         #self.is_sonic
 
@@ -53,13 +33,41 @@ class Player:
         # --- Atributos exclusivos do Player no servidor --- #
         self.total_deaths = 0
 
-        self._changed_attributes = set() # Conjunto para armazenar quais stats foram alterados
+        self._changed_attributes = set()  # Conjunto para armazenar quais stats foram alterados
+        
+        self._width = 40
+        self._height = 40
+        self._collision_box_x = self.x - self._width/2
+        self._collision_box_y = self.y - self._height/2
+        self._collision_box_width = self.x + self._width/2
+        self._collision_box_height = self.y + self._height/2
+
+    
+
+    # Este método auxiliar é chamado pelo construtor para manter o código limpo
+    def _get_real_ip(self, websocket) -> str:
+        """
+        Obtém o endereço de IP real, verificando os cabeçalhos do handshake.
+        """
+        # CORREÇÃO FINAL: O caminho correto é websocket.request.headers
+        headers = websocket.request.headers
+
+        # O resto da lógica para encontrar o IP continua a mesma
+        forwarded_for = headers.get('X-Forwarded-For')
+        if forwarded_for:
+            return forwarded_for.split(',')[0].strip()
+
+        real_ip = headers.get('X-Real-IP')
+        if real_ip:
+            return real_ip
+
+        return websocket.remote_address[0]
 
     # --- Getters & Setters --- #
 
     # --- ID, Websocket e IP --- #
     @property
-    def websocket(self):    
+    def websocket(self):
         return self._websocket
 
     @property
@@ -79,6 +87,7 @@ class Player:
     def x(self, new_x):
         if (new_x != self._x):
             self._x = new_x
+            self._collision_box_x = self.x - self._width/2
             self._changed_attributes.add("x")
 
     @property
@@ -89,8 +98,8 @@ class Player:
     def y(self, new_y):
         if (new_y != self._y):
             self._y = new_y
+            self._collision_box_y = self.y - self._height/2
             self._changed_attributes.add("y")
-
 
     @property
     def input_direction_x(self):
@@ -111,7 +120,6 @@ class Player:
         if (new_input_direction_y != self._input_direction_y):
             self._input_direction_y = new_input_direction_y
             self._changed_attributes.add("input_direction_y")
-
 
     # --- is_alive e hp --- #
     @property
@@ -166,7 +174,6 @@ class Player:
             self._total_kills = new_total_kills
             self._changed_attributes.add("total_kills")
 
-
     # --- Speed --- #
     @property
     def speed(self):
@@ -188,26 +195,44 @@ class Player:
         if (new_shoot_cooldown != self._shoot_cooldown):
             self._shoot_cooldown = new_shoot_cooldown
             self._changed_attributes.add("shoot_cooldown")
+            
+            
+    # --- Collision --- #
+    
+    @property
+    def collision_box_x(self):
+        return self._collision_box_x
+    
+    @property
+    def collision_box_y(self):
+        return self._collision_box_y
+    
+    @property
+    def width(self):
+        return self._width
 
+    @property
+    def height(self):
+        return self._height
+    
+    
 
     # --- String Representation --- #
 
     def __str__(self):
         status = "Vivo" if self._is_alive else "Morto"
-        return (
-            f"Player {self._id} | "
-            f"Time: {self._team} | "
-            f"Posição: (x={self._x}, y={self._y}) | "
-            f"Status: {status}"
-            f" | HP: {self._hp} | "
-            f"Kills: {self._total_kills} | "
-            f"Deaths: {self.total_deaths} | "
-            f"IP: {self._ip[0]}:{self._ip[1]}"
-            f" | Team ID: {self._team_id}"
-            f" | Changed Stats: {self._changed_attributes}"
-            f" | Speed: {self._speed}"
-            f" | Shoot Cooldown: {self._shoot_cooldown}"
-        )
+        return (f"Player {self._id} | "
+                f"Time: {self._team} | "
+                f"Posição: (x={self._x}, y={self._y}) | "
+                f"Status: {status}"
+                f" | HP: {self._hp} | "
+                f"Kills: {self._total_kills} | "
+                f"Deaths: {self.total_deaths} | "
+                f"IP: {self._ip}"
+                f" | Team ID: {self._team_id}"
+                f" | Changed Stats: {self._changed_attributes}"
+                f" | Speed: {self._speed}"
+                f" | Shoot Cooldown: {self._shoot_cooldown}")
 
     # --- Métodos do Player --- #
 
@@ -231,3 +256,36 @@ class Player:
     def change_team_id(self):
         self.team = "BLOOM" if self._team_id == 0 else "SKY"
         self.team_id = 0 if self._team_id == 1 else 1
+        
+    def collided(self, obj):
+        area_x = self.x - 40/2
+        area_y = self.y - 40/2
+        area_width = self.x + 20
+        area_height = self.y + 20
+        
+        collision_x = self.x < obj.x
+        
+
+        if obj.x > area_x and obj.x < area_width:
+            if obj.y > area_y and obj.y < area_height:
+                return True
+            
+        return False
+
+
+
+
+player_bitmask_layout = [
+    # attr          bitmask, data_type
+    ('x', 1 << 0, 'float'),
+    ('y', 1 << 1, 'float'),
+    ('is_alive', 1 << 2, 'u8'),
+    ('hp', 1 << 3, 'u8'),
+    ('team_id', 1 << 4, 'u8'),
+    ('team', 1 << 5, 'string'),
+    ('total_kills', 1 << 6, 'u16'),
+    ('speed', 1 << 7, 'float'),
+    ('shoot_cooldown', 1 << 8, 'float')
+]
+
+SPAWN_POSITIONS = {"SKY": {"x": 100, "y": 100}, "BLOOM": {"x": 100, "y": 500}}

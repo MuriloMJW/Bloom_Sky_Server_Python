@@ -3,9 +3,12 @@ import websockets
 import traceback
 from buffer import MyBuffer
 from player import Player, player_bitmask_layout
+from bullet import Bullet
+from network import Network
 from enum import IntEnum, auto
 import aioconsole
 import time
+import pygame
 
 # Ip onde o servidor ouve
 
@@ -17,87 +20,158 @@ server_ip = "0.0.0.0"
 debug_send_packet = False
 debug_received_packet = False
 
-#server_port = 9913
-server_port = 8080
+server_port = 9913
+#server_port = 8080
 
 # Lista de conexões
 players = {}
 new_id = 0
+
+
+bullets = []
+friendly_fire_enabled = False
 
 CONNECTION_LOCK = asyncio.Lock()
 DISCONNECTION_LOCK = asyncio.Lock()
 TEST_LOCK = asyncio.Lock()
 
 # --- Constantes do loop do jogo no servidor --- #
-
-TICK_RATE = 30 # 20 atualizações por segundo
+WINDOW_WIDTH, WINDOW_HEIGHT = 1280, 720
+TICK_RATE = 60 # 20 atualizações por segundo
 DELTA = 1.0/TICK_RATE # O tempo fixo de cada tick
 
-
-friendly_fire_enabled = False
+def player_collided_with_bullet(player, bullet):
+    
+    if player.id == bullet.shooter_id:
+        return False
+    
+    collision_x = (player.collision_box_x < bullet.collision_box_x + bullet.width) and (player.collision_box_x + player.width > bullet.collision_box_x)
+    collision_y = (player.collision_box_y < bullet.collision_box_y + bullet.height) and (player.collision_box_y + player.height > bullet.collision_box_y)
+    
+    if(collision_x and collision_y):
+        return True
+    else:
+        return False
 
 async def game_loop():
-    i=0
+    
+    
+    pygame.init()
+    window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+    font = pygame.font.Font(None, 36)
+    
+
+    
+    # É melhor usar o relógio do próprio event loop do asyncio para consistência
+    loop = asyncio.get_event_loop()
+    # Define a hora exata em que o próximo tick deve acontecer
+    next_tick_time = loop.time()
+    
+    # Variáveis para depuração
+    ticks_this_second = 0
+    second_timer = loop.time()
+    fps = 0
+    
+    
+    
+    # Loop do jogo
     while True:
-        tick_start_time = time.time()
-        # INICIO
+        
+        # ===== MAIN LOOP DO JOGO ====== #
+        ticks_this_second += 1
+        
+        # Preenche a tela com tudo preto
+        window.fill((0, 0, 0))
+        
+        # Eventos do pygame
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                quit()
+                asyncio.get_event_loop().stop()
+                
 
-        for p in players.values():
+        # Desenha os players
+        for player in players.values():
+                if(player.is_alive):
+                    color = (99, 255, 255) if player.team_id == 0 else (255, 102, 250)
+                    player_rect = pygame.Rect(player.collision_box_x, player.collision_box_y, player.width, player.height)
+                    pygame.draw.rect(window, color, player_rect)
+        
+        # Desenha os tiros
+        for bullet in list(bullets):
+            y_antes = bullet.y
+            
+            bullet.move(DELTA)
+            
+            y_depois = bullet.y
+            
+            color = (255, 0, 0)
+            bullet_rect = pygame.Rect(bullet.collision_box_x, bullet.collision_box_y, bullet.width, 30)
+           
+            pygame.draw.rect(window, color, bullet_rect)
+            
+            
+            if bullet.x < 0 or bullet.x > WINDOW_WIDTH or bullet.y < 0 or bullet.y > WINDOW_HEIGHT:
+                bullets.remove(bullet)
+                continue
+            
+                
+        # Checa as colisões
+        for player in players.values():
+            if player.is_alive:
+                for bullet in list(bullets):
+                    if player_collided_with_bullet(player, bullet):
+                        bullets.remove(bullet)
+                        
+                
 
-            moved = False
+            
+                
+        
+                
+        
+        
 
-            if "x" in p._changed_attributes or "y" in p._changed_attributes:
-                await send_player_updated(p)
 
+        
+        # Calcula os ticks por segundo
+        if loop.time() - second_timer >= 1.0:
+            #print(f"Ticks no último segundo: {ticks_this_second}")
+            fps = ticks_this_second
+            ticks_this_second = 0
+            second_timer = loop.time()
+            
+            
+        # Exibe informações na tela do servidor
+        texto_surface = font.render(f"Players: {len(players)} Bullets: {len(bullets)} FPS: {fps} ", True, (255, 255, 255))
+        window.blit(texto_surface, (10, 10)) 
+            
+        # Atualiza a tela do Pygame (vira página)
+        pygame.display.flip() 
 
+        # Calcula a hora exata em que o PRÓXIMO tick deveria acontecer,
+        # somando o delta ao horário agendado anterior.
+        next_tick_time += DELTA
 
-
-        # FIM
-        tick_end_time = time.time()
-        sleep_duration = DELTA - (tick_end_time - tick_start_time)
+        # Calcula quanto tempo precisamos "dormir" para chegar até essa hora agendada.
+        sleep_duration = next_tick_time - loop.time()
+        #print(f'{next_tick_time} {loop.time()} {sleep_duration}')
         if sleep_duration > 0:
             await asyncio.sleep(sleep_duration)
 
 
-
-class Network(IntEnum):
-    # Client -> Server
-    REQUEST_CONNECT = 0
-
-    REQUEST_PLAYER_MOVE = 1
-
-    REQUEST_PLAYER_SHOOT = 2
-    REQUEST_PLAYER_DAMAGE = 3
-    REQUEST_PLAYER_RESPAWN = 4
-    REQUEST_PLAYER_CHANGE_TEAM = 5
-    REQUEST_PLAYER_SONIC = 6
-
-    REQUEST_PLAYER_UPDATE = 7
-    CHAT_MESSAGE = 100
-    PING = 254
-
-    # Server -> Client
-    PLAYER_CONNECTED = 100
-    OTHER_PLAYER_CONNECTED = 101
-    OTHER_PLAYER_DISCONNECTED = 102
-
-    PLAYER_MOVED = 103          
-    OTHER_PLAYER_MOVED = 104
-
-    PLAYER_SHOOT = 105
-    OTHER_PLAYER_SHOOT = 106
-    PLAYER_DAMAGED = 107
-    PLAYER_KILLED = 108
-    PLAYER_RESPAWNED = 109
-    PLAYER_CHANGED_TEAM = 110
-    PLAYER_SONICKED = 111
-
-    PLAYER_UPDATED = 112 
-    PLAYER_SETUP = 113
-
-    RANKING_UPDATED = 199
-    CHAT_RECEIVED = 200
-    PONG = 255
+'''
+next     loop.time     sleep
+ 0
+ 0.16     0.10         0.16 - 0.10 = 0.06
+ 0.32     0.90         0.32 - 0.90 = -0.58 (Não dorme)
+ 0.48     0.91         0.48 - 0.91 = -0.43 (Não dorme)
+ 0.64     0.92         0.64 - 0.92 = -0.28 (Não dorme)
+ 0.80     0.93         0.80 - 0.93 = -0.13 (Não dorme)
+ 0.96     0.94         0.96 - 0.94 = 0.02 
+ 1.12     0.99         1.12 - 0.99 = 0.17
+ '''
 
 
 # ----- [ MÉTODOS DE TRATAMENTO DE PACKETS ] ----- #
@@ -293,7 +367,6 @@ async def handle_request_player_move(buffer, player):
     # Lê a posição do player
     new_x = buffer.read_float()
     new_y = buffer.read_float()
-    print(f"@@@@@@@@@@@@@@ {new_x} {new_y}")
     # Se clicou fora da area de jogo
 
     # Atualiza a posição do player
@@ -302,10 +375,6 @@ async def handle_request_player_move(buffer, player):
 
     if(player.y > 500):
         player.y = 500
-
-    print(f'{player.x} {player.y} @@@@@@@@@@@@@@@@')
-
-    print(str(player))
 
 
     await send_player_updated(player)
@@ -319,6 +388,10 @@ async def handle_request_player_shoot(buffer, player):
     buffer.clear()
     buffer.write_u8(Network.PLAYER_SHOOT)
     buffer.write_u8(player.id)
+    
+    bullet = Bullet(player.x, player.y, 180, player.id)
+    bullets.append(bullet)
+
 
     await send_packet_to_all(buffer)
 
@@ -867,10 +940,10 @@ async def main():
 
     input_task = asyncio.create_task(read_input())
 
-    #game_loop_task = asyncio.create_task(game_loop())
+    game_loop_task = asyncio.create_task(game_loop())
 
 
-    async with websockets.serve(handler, server_ip, server_port, ping_timeout=10000): 
+    async with websockets.serve(handler, server_ip, server_port): 
         # Roda pra sempre, quando recebe uma conexão, chama o evento handler(websocket)
         await asyncio.Future() 
 
