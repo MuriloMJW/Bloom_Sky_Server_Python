@@ -35,7 +35,9 @@ class Network(IntEnum):
 
     PLAYER_UPDATED = 112 
     PLAYER_SETUP = 113
-
+    
+    
+    RAT_ATTACKED = 198
     RANKING_UPDATED = 199
     CHAT_RECEIVED = 200
     PONG = 255

@@ -1,58 +1,63 @@
 import websockets
+from entity import Entity
+from bullet import Bullet
+import random
+import time
 
-class Player:
-
+class Player (Entity):
+    
     def __init__(self, websocket, id):
 
-        self._websocket = websocket
-
+        # Identidade
+        self._websocket = websocket # Conexão
         self._ip = str(self._get_real_ip(websocket))
-
         self._id = id
-
+        
+        # Time
         self._team_id = id % 2
         self._team = "SKY" if self._team_id == 0 else "BLOOM"
 
-        self._x = SPAWN_POSITIONS[self.team]["x"]
-        self._y = SPAWN_POSITIONS[self.team]["y"]
-
-        self._input_direction_x = 0
-        self._input_direction_y = 0
-
-        self._is_alive = True
-        self._hp = 100  # HP inicial do jogador
-
-        #self.is_sonic
-
-        self._total_kills = 0
-
-        self._speed = 500
-
-        self._shoot_cooldown = 0.1
-
-        # --- Atributos exclusivos do Player no servidor --- #
-        self.total_deaths = 0
-
-        self._changed_attributes = set()  # Conjunto para armazenar quais stats foram alterados
+        # Entity
+        _x = SPAWN_POSITIONS[self.team]["x"]
+        _y = SPAWN_POSITIONS[self.team]["y"]
+        _width = 40
+        _height = 40
+        _rotation = 180 if self._team_id == 0 else 0
         
-        self._width = 40
-        self._height = 40
-        self._collision_box_x = self.x - self._width/2
-        self._collision_box_y = self.y - self._height/2
-        self._collision_box_width = self.x + self._width/2
-        self._collision_box_height = self.y + self._height/2
+        _speed = 500
+        
+        super().__init__(_x, _y, _width, _height, _rotation, _speed)
 
-    
+        # Vida
+        self._is_alive = True
+        self._hp = 100
 
-    # Este método auxiliar é chamado pelo construtor para manter o código limpo
+        # Tiro
+        self._shoot_cooldown = 0.3
+        self.last_shoot_time = 0
+
+        # K/D
+        self._total_kills = 0  # Server only
+        self.total_deaths = 0  # Server only
+        self._death_time = 0   # Server only
+        self._respawn_time = 5 # Server only
+          
+        # Powerups
+        self.is_sonic_mode = False
+
+        
+        # Conjunto para armazenar quais atributos foram alterados
+        self._changed_attributes = set()  
+        
+
+
+    # Este método auxiliar é chamado pelo construtor para pegar o ip verdadeiro
     def _get_real_ip(self, websocket) -> str:
         """
         Obtém o endereço de IP real, verificando os cabeçalhos do handshake.
         """
-        # CORREÇÃO FINAL: O caminho correto é websocket.request.headers
         headers = websocket.request.headers
 
-        # O resto da lógica para encontrar o IP continua a mesma
         forwarded_for = headers.get('X-Forwarded-For')
         if forwarded_for:
             return forwarded_for.split(',')[0].strip()
@@ -65,7 +70,7 @@ class Player:
 
     # --- Getters & Setters --- #
 
-    # --- ID, Websocket e IP --- #
+    # --- Identidade --- #
     @property
     def websocket(self):
         return self._websocket
@@ -78,50 +83,38 @@ class Player:
     def id(self) -> int:
         return self._id
 
-    # --- X e Y --- #
-    @property
-    def x(self):
-        return self._x
+    # --- Transform --- #
 
-    @x.setter
+    @Entity.x.setter
     def x(self, new_x):
         if (new_x != self._x):
             self._x = new_x
             self._collision_box_x = self.x - self._width/2
             self._changed_attributes.add("x")
 
-    @property
-    def y(self):
-        return self._y
-
-    @y.setter
+    @Entity.y.setter
     def y(self, new_y):
         if (new_y != self._y):
             self._y = new_y
             self._collision_box_y = self.y - self._height/2
             self._changed_attributes.add("y")
+            
+    # Enviar para o client ou ta bom assim?
+    @Entity.rotation.setter
+    def rotation(self, new_rotation):
+        if (new_rotation != self._rotation):
+            self._rotation = new_rotation
+            #self._changed_attributes.add("rotation")
 
-    @property
-    def input_direction_x(self):
-        return self._input_direction_x
+    # --- Speed --- #
+    @Entity.speed.setter
+    def speed(self, new_speed):
+        if (new_speed != self._speed):
+            self._speed = new_speed
+            self._changed_attributes.add("speed")
 
-    @input_direction_x.setter
-    def input_direction_x(self, new_input_direction_x):
-        if (new_input_direction_x != self._input_direction_x):
-            self._input_direction_x = new_input_direction_x
-            self._changed_attributes.add("input_direction_x")
 
-    @property
-    def input_direction_y(self):
-        return self._input_direction_y
-
-    @input_direction_y.setter
-    def input_direction_y(self, new_input_direction_y):
-        if (new_input_direction_y != self._input_direction_y):
-            self._input_direction_y = new_input_direction_y
-            self._changed_attributes.add("input_direction_y")
-
-    # --- is_alive e hp --- #
+    # --- Vida --- #
     @property
     def is_alive(self):
         return self._is_alive
@@ -142,7 +135,18 @@ class Player:
             self._hp = new_hp
             self._changed_attributes.add("hp")
 
-    # --- Team ID e Team --- #
+    # --- Tiro --- #
+    @property
+    def shoot_cooldown(self):
+        return self._shoot_cooldown
+
+    @shoot_cooldown.setter
+    def shoot_cooldown(self, new_shoot_cooldown):
+        if (new_shoot_cooldown != self._shoot_cooldown):
+            self._shoot_cooldown = new_shoot_cooldown
+            self._changed_attributes.add("shoot_cooldown")
+
+    # --- Time --- #
     @property
     def team_id(self):
         return self._team_id
@@ -174,49 +178,22 @@ class Player:
             self._total_kills = new_total_kills
             self._changed_attributes.add("total_kills")
 
-    # --- Speed --- #
     @property
-    def speed(self):
-        return self._speed
-
-    @speed.setter
-    def speed(self, new_speed):
-        if (new_speed != self._speed):
-            self._speed = new_speed
-            self._changed_attributes.add("speed")
-
-    # --- Shoot --- #
+    def death_time(self):
+        return self._death_time
+    
+    @ death_time.setter
+    def death_time(self, new_death_time):
+        if (new_death_time != self._death_time):
+            self._death_time = new_death_time
+    
     @property
-    def shoot_cooldown(self):
-        return self._shoot_cooldown
+    def respawn_time(self):
+        return self._respawn_time
 
-    @shoot_cooldown.setter
-    def shoot_cooldown(self, new_shoot_cooldown):
-        if (new_shoot_cooldown != self._shoot_cooldown):
-            self._shoot_cooldown = new_shoot_cooldown
-            self._changed_attributes.add("shoot_cooldown")
+    
+
             
-            
-    # --- Collision --- #
-    
-    @property
-    def collision_box_x(self):
-        return self._collision_box_x
-    
-    @property
-    def collision_box_y(self):
-        return self._collision_box_y
-    
-    @property
-    def width(self):
-        return self._width
-
-    @property
-    def height(self):
-        return self._height
-    
-    
-
     # --- String Representation --- #
 
     def __str__(self):
@@ -240,12 +217,14 @@ class Player:
         if self.is_alive:
             self.hp -= damage
             if self.hp <= 0:
-                self.kill()
+                self.die()
 
-    def kill(self):
+    def die(self):
         self.hp = 0
         self.is_alive = False
         self.total_deaths += 1
+        self.death_time = time.time()
+
 
     def respawn(self):
         self.hp = 100
@@ -256,22 +235,50 @@ class Player:
     def change_team_id(self):
         self.team = "BLOOM" if self._team_id == 0 else "SKY"
         self.team_id = 0 if self._team_id == 1 else 1
+        self.rotation = 180 if self._team_id == 0 else 0
+
         
-    def collided(self, obj):
-        area_x = self.x - 40/2
-        area_y = self.y - 40/2
-        area_width = self.x + 20
-        area_height = self.y + 20
+    def shoot(self):
         
-        collision_x = self.x < obj.x
+        if(time.time() - self.last_shoot_time < self.shoot_cooldown):
+            return
+        
+        self.last_shoot_time = time.time()
+        
+        
+        if (self.is_sonic_mode):
+            if (self.rotation >= 360):
+                self.rotation = 0
+                
+            self.rotation += 10
         
 
-        if obj.x > area_x and obj.x < area_width:
-            if obj.y > area_y and obj.y < area_height:
-                return True
+        elif (self.rotation != 0):
+            self.rotation = 180 if self._team_id == 0 else 0
+         
+        shot_angle = self.rotation
             
-        return False
-
+        bullet = Bullet(self.x, self.y, shot_angle, self.id)
+        return bullet
+    
+    
+    def sonic(self):
+        self.is_sonic_mode = not self.is_sonic_mode
+        self.shoot_cooldown = 0.001 if self.is_sonic_mode else 0.5
+        
+    
+    def collided_with_bullet(self, bullet):
+    
+        if self.id == bullet.shooter_id:
+            return False
+        
+        collision_x = (self.collision_box_x < bullet.collision_box_x + bullet.width) and (self.collision_box_x + self.width > bullet.collision_box_x)
+        collision_y = (self.collision_box_y < bullet.collision_box_y + bullet.height) and (self.collision_box_y + self.height > bullet.collision_box_y)
+        
+        if(collision_x and collision_y):
+            return True
+        else:
+            return False
 
 
 
@@ -288,4 +295,8 @@ player_bitmask_layout = [
     ('shoot_cooldown', 1 << 8, 'float')
 ]
 
+
+
+
 SPAWN_POSITIONS = {"SKY": {"x": 100, "y": 100}, "BLOOM": {"x": 100, "y": 500}}
+

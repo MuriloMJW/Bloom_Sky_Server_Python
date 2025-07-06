@@ -9,6 +9,7 @@ from enum import IntEnum, auto
 import aioconsole
 import time
 import pygame
+import random
 
 # Ip onde o servidor ouve
 
@@ -40,18 +41,7 @@ WINDOW_WIDTH, WINDOW_HEIGHT = 1280, 720
 TICK_RATE = 60 # 20 atualizações por segundo
 DELTA = 1.0/TICK_RATE # O tempo fixo de cada tick
 
-def player_collided_with_bullet(player, bullet):
-    
-    if player.id == bullet.shooter_id:
-        return False
-    
-    collision_x = (player.collision_box_x < bullet.collision_box_x + bullet.width) and (player.collision_box_x + player.width > bullet.collision_box_x)
-    collision_y = (player.collision_box_y < bullet.collision_box_y + bullet.height) and (player.collision_box_y + player.height > bullet.collision_box_y)
-    
-    if(collision_x and collision_y):
-        return True
-    else:
-        return False
+
 
 async def game_loop():
     
@@ -100,31 +90,40 @@ async def game_loop():
         
         # Desenha os tiros
         for bullet in list(bullets):
-            y_antes = bullet.y
             
             bullet.move(DELTA)
-            
-            y_depois = bullet.y
             
             color = (255, 0, 0)
             bullet_rect = pygame.Rect(bullet.collision_box_x, bullet.collision_box_y, bullet.width, 30)
            
             pygame.draw.rect(window, color, bullet_rect)
             
-            
+            # Remover a bullet ao sair da tela
             if bullet.x < 0 or bullet.x > WINDOW_WIDTH or bullet.y < 0 or bullet.y > WINDOW_HEIGHT:
                 bullets.remove(bullet)
                 continue
-            
-                
-        # Checa as colisões
+                      
+        # Checa as colisões de bullet com player
         for player in players.values():
             if player.is_alive:
                 for bullet in list(bullets):
-                    if player_collided_with_bullet(player, bullet):
+                    if player.collided_with_bullet(bullet):
                         bullets.remove(bullet)
+                        await handle_request_player_damage(player.id, bullet.shooter_id, 20)
+        
+        
+        # Checa as colisões de bullet com bullet
+        for bullet in list(bullets):
+            for bullet2 in list(bullets):
+                if bullet.collided_with_bullet(bullet2):
+                    bullets.remove(bullet)
+                    bullets.remove(bullet2)
                         
-                
+        # Checa se já pode respawnar o player
+        for player in players.values():
+            if player.is_alive == False:
+                if time.time() >= player.death_time + player.respawn_time:
+                    await respawn_id(player.id)
 
             
                 
@@ -246,7 +245,8 @@ async def received_packets(packet, player):
             await handle_request_player_shoot(buffer, player)
 
         case Network.REQUEST_PLAYER_DAMAGE:
-            await handle_request_player_damage(buffer, player)
+            #await handle_request_player_damage(buffer, player)
+            pass
 
         case Network.REQUEST_PLAYER_RESPAWN:
             await handle_request_player_respawn(buffer, player)
@@ -370,36 +370,46 @@ async def handle_request_player_move(buffer, player):
     # Se clicou fora da area de jogo
 
     # Atualiza a posição do player
-    player.x += new_x * player.speed * 1.0/60.0
-    player.y += new_y * player.speed * 1.0/60.0
+    new_x = player.x + new_x * player.speed * 1.0/60.0
+    new_y = player.y + new_y * player.speed * 1.0/60.0
 
+    if new_x < 0 or new_x > WINDOW_WIDTH or new_y < 0 or new_y > WINDOW_HEIGHT or new_y > 500:
+        return
+    
+    player.x = new_x
+    player.y = new_y
+    
     if(player.y > 500):
         player.y = 500
 
 
     await send_player_updated(player)
     
-    #await send_player_updated(player)
-
-    #await send_packet(buffer, player)
 
 async def handle_request_player_shoot(buffer, player):
     print("===REQUEST PLAYER SHOOT===")
+    
+    
+    bullet = player.shoot()
+    
+    if not bullet:
+        return
+    
+    bullets.append(bullet)
+    
+    
     buffer.clear()
     buffer.write_u8(Network.PLAYER_SHOOT)
     buffer.write_u8(player.id)
-    
-    bullet = Bullet(player.x, player.y, 180, player.id)
-    bullets.append(bullet)
+    buffer.write_u16(bullet.speed)
+    buffer.write_u16(bullet.rotation)
+
 
 
     await send_packet_to_all(buffer)
 
-async def handle_request_player_damage(buffer, player):
+async def handle_request_player_damage(player_damaged_id, player_damager_id, damage):
     print("===REQUEST PLAYER DAMAGE===")
-    player_damaged_id = buffer.read_u8()
-    player_damager_id = buffer.read_u8()
-    damage = buffer.read_u8()
 
 
 
@@ -415,7 +425,6 @@ async def handle_request_player_damage(buffer, player):
 
     chat_text = ''
 
-    buffer.clear()
 
     # Se o player morreu
     if players[player_damaged_id].is_alive == False: 
@@ -461,12 +470,15 @@ async def handle_request_player_change_team(buffer, player):
 
 async def handle_request_player_sonic(buffer, player):
     print("===REQUEST PLAYER SONIC===")
-
+    
+    player.sonic()
 
     buffer.clear()
     buffer.write_u8(Network.PLAYER_SONICKED)
     buffer.write_u8(player.id)
     await send_packet_to_all(buffer)
+    await send_player_updated(player)
+
 
 async def _handle_chat_message(buffer, player):
     print("===CHAT MESSAGE===")
@@ -494,20 +506,7 @@ async def _handle_chat_message(buffer, player):
 
     # Easter Egg
     if message_received == "RAT ATTACK":
-
-        for p in players.values():
-            buffer_rat = MyBuffer()
-            buffer_rat.clear()
-            buffer_rat.write_u8(p.id)
-            buffer_rat.write_u8(player.id)
-            buffer_rat.write_u8(100)
-            buffer_rat.seek_start()
-            await handle_request_player_damage(buffer_rat, player) # Dano de 1 HP para todos os players quando alguém envia uma mensagem no chat
-
-        message = "RAT ATTACK\n"*10
-        message += f"PLAYER {player.id} MANDOU OS RATO MATAR VCS TUDO"
-
-        #await send_chat_message_to_all(message) # Envia mensagem de chat para todos os players
+        await rat_attack(player)
 
 async def _handle_ping(buffer, player):
     #print("===PING===")
@@ -565,7 +564,7 @@ async def damage_id(player_to_damage_id, damage):
     await send_player_updated(players[player_to_damage_id])
 
 async def kill_id(player_to_kill_id):
-    players[player_to_kill_id].kill()
+    players[player_to_kill_id].die()
 
     await send_player_updated(players[player_to_kill_id])
 
@@ -625,7 +624,27 @@ async def change_speed_id(player_to_change_speed_id, new_speed):
     
     await send_player_updated(players[player_to_change_speed_id])
 
+async def rat_attack(player):
+    print("===RAT ATTACK===")
+    await kill_all_except(player.id)
 
+    buffer_rat = MyBuffer()
+    buffer_rat.clear()
+    buffer_rat.write_u8(Network.RAT_ATTACKED)
+    await send_packet_to_all(buffer_rat)
+    
+    message = ""
+    
+    for i in range(100):
+        r = random.randint(0, 255)
+        g = random.randint(0, 255)
+        b = random.randint(0, 255)
+        hex_color = "#{:02x}{:02x}{:02x}".format(r, g, b)
+        message += f"[color={hex_color}]RAT ATTACK[/color] "
+        
+    message += f"\nPLAYER {player.id} MANDOU OS RATO MATAR VCS TUDO"
+
+    await send_chat_message_to_all(message) # Envia mensagem de chat para todos os players
 
 
 
