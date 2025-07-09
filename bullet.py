@@ -9,7 +9,7 @@ class Bullet(Entity):
         _y = y
         _rotation = rotation
        
-        _speed = 150
+        _speed = 555
         _width = 8
         _height = 30
         

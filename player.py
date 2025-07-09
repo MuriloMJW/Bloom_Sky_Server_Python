@@ -3,15 +3,18 @@ from entity import Entity
 from bullet import Bullet
 import random
 import time
-
+# EITA LASKERA
 class Player (Entity):
     
-    def __init__(self, websocket, id):
+    def __init__(self, websocket, id, username):
 
         # Identidade
         self._websocket = websocket # Conexão
         self._ip = str(self._get_real_ip(websocket))
         self._id = id
+        
+        self._is_authenticated = False
+        self._username = username
         
         # Time
         self._team_id = id % 2
@@ -83,6 +86,25 @@ class Player (Entity):
     def id(self) -> int:
         return self._id
 
+    @property
+    def is_authenticated(self):
+        return self._is_authenticated
+
+    @is_authenticated.setter
+    def is_authenticated(self, new_is_authenticated):
+        if (new_is_authenticated != self._is_authenticated):
+            self._is_authenticated = new_is_authenticated
+            
+    @property
+    def username(self):
+        return self._username
+
+    @username.setter
+    def username(self, new_username):
+        if (new_username != self._username):
+            self._username = new_username
+
+    
     # --- Transform --- #
 
     @Entity.x.setter
@@ -191,7 +213,7 @@ class Player (Entity):
     def respawn_time(self):
         return self._respawn_time
 
-    
+
 
             
     # --- String Representation --- #
@@ -213,6 +235,10 @@ class Player (Entity):
 
     # --- Métodos do Player --- #
 
+    def authenticate(self, username):
+        self.is_authenticated = True
+        self.username = username
+    
     def take_damage(self, damage):
         if self.is_alive:
             self.hp -= damage
@@ -284,15 +310,16 @@ class Player (Entity):
 
 player_bitmask_layout = [
     # attr          bitmask, data_type
-    ('x', 1 << 0, 'float'),
-    ('y', 1 << 1, 'float'),
-    ('is_alive', 1 << 2, 'u8'),
-    ('hp', 1 << 3, 'u8'),
-    ('team_id', 1 << 4, 'u8'),
-    ('team', 1 << 5, 'string'),
-    ('total_kills', 1 << 6, 'u16'),
-    ('speed', 1 << 7, 'float'),
-    ('shoot_cooldown', 1 << 8, 'float')
+    ('x',              1 << 0, 'float'),
+    ('y',              1 << 1, 'float'),
+    ('is_alive',       1 << 2, 'u8'),
+    ('hp',             1 << 3, 'u8'),
+    ('team_id',        1 << 4, 'u8'),
+    ('team',           1 << 5, 'string'),
+    ('total_kills',    1 << 6, 'u16'),
+    ('speed',          1 << 7, 'float'),
+    ('shoot_cooldown', 1 << 8, 'float'),
+    ('username',       1 << 9, 'string')
 ]
 
 

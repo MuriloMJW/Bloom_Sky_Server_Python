@@ -25,6 +25,7 @@ server_port = 9913
 #server_port = 8080
 
 # Lista de conexões
+pending_connections = {}
 players = {}
 new_id = 0
 
@@ -115,7 +116,7 @@ async def game_loop():
         # Checa as colisões de bullet com bullet
         for bullet in list(bullets):
             for bullet2 in list(bullets):
-                if bullet.collided_with_bullet(bullet2):
+                if bullet.collided_with_bullet(bullet2) and bullet in bullets and bullet2 in bullets:
                     bullets.remove(bullet)
                     bullets.remove(bullet2)
                         
@@ -220,6 +221,7 @@ async def write_payload_to_buffer(buffer, payload_to_write):
             buffer.write_float(player_attribute)
         elif data_type == 'string':
             buffer.write_string(player_attribute)
+                      
 
 async def received_packets(packet, player):
 
@@ -245,8 +247,7 @@ async def received_packets(packet, player):
             await handle_request_player_shoot(buffer, player)
 
         case Network.REQUEST_PLAYER_DAMAGE:
-            #await handle_request_player_damage(buffer, player)
-            pass
+            await damage_id(player.id, 20)
 
         case Network.REQUEST_PLAYER_RESPAWN:
             await handle_request_player_respawn(buffer, player)
@@ -271,6 +272,7 @@ async def received_packets(packet, player):
 async def handle_request_connect(player):
     print("===REQUEST CONNECT===")
 
+    
     print(str(player))
 
 
@@ -888,60 +890,87 @@ async def command_speed_id(args, player):
 
 #Couroutine executada com a conexão recebida
 async def handler(websocket):
-
-    print("Connection received: ", websocket.remote_address)
-
+    print(f"Nova conexão de {websocket.remote_address}. Aguardando pedido de autenticação...")
+    username = None
     player = None
-
-    async with CONNECTION_LOCK:
-
-        global new_id
-
-        player = Player(websocket, new_id)
-
-        # Acrescenta o player no dictionary. id: player
-        players[new_id] = player
-
-        new_id += 1
-
-        print(f"Player {player.id} entrou na seção crítica. Total de players: {len(players)}")
-
-        await handle_request_connect(player)
-
-
-
     try:
-        while True: #Fica ouvindo as mensagens recebidas de cada websocket para sempre, mantendo a conexão ligada
-            packet = await websocket.recv() #
-            #print(packet)
-            #print(*packet)
-
-            # Received Packets com o buffer recebido e o Id de quem enviou
-            await received_packets(packet, player)
-
+        async for packet in websocket:
+            
+            buffer = MyBuffer(packet)
+    
+            msgid = buffer.read_u8()
+            
+            # ESTADO 1: ESPERANDO AUTENTICAÇÃO
+            if username is None:
+            
+                if msgid == Network.REQUEST_AUTH:
+                    username = buffer.read_string()
+                    # Teste de exemplo de falha na autenticação
+                    if username == "admin":
+                        buffer.clear()
+                        buffer.write_u8(Network.AUTH_FAIL)
+                        username = None
+                        await websocket.send(buffer.get_data_array())
+                    else: # Sucesso na autenticação
+                        buffer.clear()
+                        buffer.write_u8(Network.AUTH_SUCCESS)
+                        await websocket.send(buffer.get_data_array())
+                        pending_connections[websocket] = username
+                else:
+                    # Protocolo violado: pacote inesperado antes da autenticação.
+                    print("Protocolo violado: pacote inesperado antes da autenticação: ", msgid)
+                    await websocket.close(code=1003, reason="Authentication required")
+                    break
+            
+            # ESTADO 2: AUTENTICADO, ESPERANDO ENTRAR NO JOGO
+            elif player is None:  
+                if msgid == Network.REQUEST_CONNECTS:
+                    async with CONNECTION_LOCK:
+                        global new_id
+                        # Cria o objeto player e o associa ao websocket e a um novo ID
+                        player = Player(websocket, new_id, username)
+                        players[new_id] = player  # Adiciona ao dicionário global
+                        print(f"Lock adquirido. Criando Player com ID: {new_id}")
+                        new_id += 1
+                    
+                    del pending_connections[websocket]
+                    
+                    await handle_request_connect(player)
+                else:
+                    # Protocolo violado: o cliente está autenticado, mas enviou um
+                    # pacote inválido (ex: movimento) antes de entrar no jogo.
+                    print("Protocolo violado: o cliente está autenticado, mas enviou um pacote inválido: ", msgid)
+                    await websocket.close(code=1003, reason="Request connect required")
+                    break
+                    
+            # ESTADO 3: NO JOGO
+            else:
+                # Processa os pacotes normais do jogo (movimento, tiro, etc.)
+                await received_packets(packet, player)
+                
+                
+                
     except websockets.exceptions.ConnectionClosed as e:
-
-            print(f"Player ID {player.id} disconnected", e)
-
+        # Se a conexão cair em qualquer ponto do processo...
+        print(f"Conexão com {websocket.remote_address} fechada.", e)
+        if player is not None:
+            # Se o player chegou a ser criado, remove ele do jogo de forma segura
             async with DISCONNECTION_LOCK:
+                if player.id in players:
+                    print(f"Removendo Player ID {player.id} do jogo...")
+                    del players[player.id]
+                    
+                    # Avisa aos outros jogadores que este saiu
+                    buffer_disconnect = MyBuffer()
+                    buffer_disconnect.write_u8(Network.OTHER_PLAYER_DISCONNECTED)
+                    buffer_disconnect.write_u8(player.id)
+                    await send_packet_to_all(buffer_disconnect)
+                    print(f"Player {player.id} removido. Total de players: {len(players)}")
 
-                player_removed_id = player.id
+    print(f"Handler para a conexão de {websocket.remote_address} foi finalizado.")
+    if websocket in pending_connections:
+        del pending_connections[websocket]
 
-                if (player_removed_id in players):
-                    # Futuramente fazer uma def pra matar e desconectar o player
-                    #await kill_id(player_removed_id) 
-                    del players[player_removed_id]
-
-                print(f"Player {player.id} removido da lista. Total de players: {len(players)}")
-
-                buffer = MyBuffer()
-
-                buffer.write_u8(Network.OTHER_PLAYER_DISCONNECTED)
-                buffer.write_u8(player_removed_id)
-                await send_packet_to_all(buffer)
-
-
-    print("Connection finished")
 
 async def read_input():
     while True:
