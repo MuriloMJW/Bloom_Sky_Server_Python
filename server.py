@@ -29,6 +29,8 @@ pending_connections = {}
 players = {}
 new_id = 0
 
+SKY_COLOR = (99, 255, 255)
+BLOOM_COLOR = (255, 102, 250)
 
 bullets = []
 friendly_fire_enabled = False
@@ -47,6 +49,7 @@ DELTA = 1.0/TICK_RATE # O tempo fixo de cada tick
 async def game_loop():
     
     
+    
     pygame.init()
     window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
     font = pygame.font.Font(None, 36)
@@ -63,7 +66,13 @@ async def game_loop():
     second_timer = loop.time()
     fps = 0
     
+    match_start_time = loop.time()
+    match_duration = 60*3
     
+    sent_2_min_warning = False
+    sent_1_min_warning = False
+    sent_30_sec_warning = False
+    sent_10_sec_warning = False
     
     # Loop do jogo
     while True:
@@ -127,8 +136,63 @@ async def game_loop():
                     await respawn_id(player.id)
 
             
-                
+        match_end_time = match_start_time + match_duration
+            
         
+
+        # --- Dentro do seu loop principal ---
+
+        # Lógica para 2 minutos
+        if(loop.time() >= match_end_time - 120 and not sent_2_min_warning):
+            await send_chat_message_to_all("[color=yellow]Faltam 2 minutos para o fim da partida![/color]")
+            sent_2_min_warning = True
+
+        # Lógica para 1 minuto
+        elif(loop.time() >= match_end_time - 60 and not sent_1_min_warning):
+            await send_chat_message_to_all("[color=yellow]Falta 1 minuto para o fim da partida![/color]")
+            sent_1_min_warning = True
+
+        # Lógica para 30 segundos
+        elif(loop.time() >= match_end_time - 30 and not sent_30_sec_warning):
+            await send_chat_message_to_all("[color=yellow]Faltam 30 segundos para o fim da partida![/color]")
+            sent_30_sec_warning = True
+
+        # Lógica para 10 segundos
+        elif(loop.time() >= match_end_time - 10 and not sent_10_sec_warning):
+            await send_chat_message_to_all("[color=yellow]Faltam 10 segundos para o fim da partida![/color]")
+            sent_10_sec_warning = True  
+        
+        # MATCH
+        if(loop.time() >= match_start_time + match_duration):
+            
+            # Ordena os jogadores por total_kills
+            
+            if len(players) > 0:
+            
+                players_ranked = sorted(players.values(), key=lambda p: p.total_kills, reverse=True)
+                player_winner = players_ranked[0]
+                
+                popup_text = str(player_winner.id)+ " "+ player_winner.username+ " IS THE BEST!"
+                
+                for player in list(players.values()):
+                    if player in players.values():
+                        player.total_kills = 0
+                        player.total_deaths = 0
+
+                    
+                await send_ranking_updated()
+                await send_popup_message(popup_text)
+                
+                
+                sent_2_min_warning = False
+                sent_1_min_warning = False
+                sent_30_sec_warning = False
+                sent_10_sec_warning = False
+                await send_chat_message_to_all("[color=yellow]Iniciando nova partida de 3 minutos![/color]")
+                match_start_time = loop.time()
+            
+            
+            
                 
         
         
@@ -181,6 +245,7 @@ async def send_packet(packet : MyBuffer, player : Player):
 
     if player.websocket.state != connection_state.OPEN:
         print(f"==FAILED TO SEND PACKET TO {player.id} STATE: {player.websocket.state.name}===")
+        await disconnect_player(player)
         return
 
     if(debug_send_packet):
@@ -196,11 +261,11 @@ async def send_packet(packet : MyBuffer, player : Player):
 
 async def send_packet_to_all(packet : MyBuffer):
     # Avisa a todos os jogadores o chat
-    for other_player in players.values():
+    for other_player in list(players.values()):
         await send_packet(packet, other_player)
 
 async def send_packet_to_all_except(packet, player_except):
-    for other_player in players.values():
+    for other_player in list(players.values()):
         if(other_player.id != player_except.id):
             await send_packet(packet, other_player)
 
@@ -250,7 +315,8 @@ async def received_packets(packet, player):
             await damage_id(player.id, 20)
 
         case Network.REQUEST_PLAYER_RESPAWN:
-            await handle_request_player_respawn(buffer, player)
+            #await handle_request_player_respawn(buffer, player)
+            pass
 
         case Network.REQUEST_PLAYER_CHANGE_TEAM:
             await handle_request_player_change_team(buffer, player)
@@ -334,9 +400,9 @@ async def handle_request_connect(player):
         await send_packet(buffer_other, player)
 
 async def send_player_updated(player):
-    print("===SENDING PLAYER UPDATED TO ALL===")
+    #print("===SENDING PLAYER UPDATED TO ALL===")
 
-    print(str(player))
+    #print(str(player))
 
 
     # Lista de tuplas ex ('u16', player.x) a
@@ -364,7 +430,7 @@ async def send_player_updated(player):
     await send_packet_to_all(buffer)
 
 async def handle_request_player_move(buffer, player):
-    print("===REQUEST PLAYER MOVE===")
+    #print("===REQUEST PLAYER MOVE===")
 
     # Lê a posição do player
     new_x = buffer.read_float()
@@ -389,7 +455,7 @@ async def handle_request_player_move(buffer, player):
     
 
 async def handle_request_player_shoot(buffer, player):
-    print("===REQUEST PLAYER SHOOT===")
+    #print("===REQUEST PLAYER SHOOT===")
     
     
     bullet = player.shoot()
@@ -411,7 +477,7 @@ async def handle_request_player_shoot(buffer, player):
     await send_packet_to_all(buffer)
 
 async def handle_request_player_damage(player_damaged_id, player_damager_id, damage):
-    print("===REQUEST PLAYER DAMAGE===")
+    #print("===REQUEST PLAYER DAMAGE===")
 
 
 
@@ -473,12 +539,16 @@ async def handle_request_player_change_team(buffer, player):
 async def handle_request_player_sonic(buffer, player):
     print("===REQUEST PLAYER SONIC===")
     
-    player.sonic()
+    
+    player.power_up_sonic()
+    
+    '''
+    if player.has_sonic_power_up:
+        player.reset_attributes()
+    else:
+        player.power_up_sonic()
+    '''
 
-    buffer.clear()
-    buffer.write_u8(Network.PLAYER_SONICKED)
-    buffer.write_u8(player.id)
-    await send_packet_to_all(buffer)
     await send_player_updated(player)
 
 
@@ -491,13 +561,20 @@ async def _handle_chat_message(buffer, player):
         await commands(message_received, player)
         return
 
+    username_text = ""
+    
+    if player.team == "SKY":
+        #Formatação                        # R                #G                #B         [1]           [usuario]
+        username_text = f"[color=#{SKY_COLOR[0]:02x}{SKY_COLOR[1]:02x}{SKY_COLOR[2]:02x}][{player.id}][{player.username}][/color] "
+    else:
+        username_text = f"[color=#{BLOOM_COLOR[0]:02x}{BLOOM_COLOR[1]:02x}{BLOOM_COLOR[2]:02x}][{player.id}][{player.username}][/color] "
+    
+    
+    
 
-
-    chat_text = "["+str(player.id)+"] "
-
-
-
+    chat_text = username_text
     chat_text += message_received
+    
     print(chat_text)
 
     buffer.clear()
@@ -537,8 +614,16 @@ async def send_chat_message_to_all(chat_text):
 
     await send_packet_to_all(buffer) 
 
+async def send_popup_message(popup_text):
+    buffer = MyBuffer()
+    buffer.write_u8(Network.POPUP_RECEIVED)
+    buffer.write_string(popup_text)
+
+    await send_packet_to_all(buffer) 
+
+
 async def send_ranking_updated():
-    print("===SENDING RANKING UPDATED===")
+    #print("===SENDING RANKING UPDATED===")
 
     # Ordena os jogadores por total_kills
     players_ranked = sorted(players.values(), key=lambda p: p.total_kills, reverse=True)
@@ -886,6 +971,22 @@ async def command_speed_id(args, player):
     #await send_chat_message_to_all(f"A velocidade do Player {target_id} foi alterada para {new_speed}.")
 
 
+async def disconnect_player(player):
+    if player is None or player.id not in players:
+        return
+    
+    async with DISCONNECTION_LOCK:
+        
+        if player.id in players:
+            print(f"Desconectando Player {player.id}")
+            del players[player.id]
+            
+            # Avisa aos outros jogadores que este saiu
+            buffer_disconnect = MyBuffer()
+            buffer_disconnect.write_u8(Network.OTHER_PLAYER_DISCONNECTED)
+            buffer_disconnect.write_u8(player.id)
+            await send_packet_to_all(buffer_disconnect)
+            print(f"Player {player.id} removido. Total de players: {len(players)}")
 
 
 #Couroutine executada com a conexão recebida
@@ -948,28 +1049,19 @@ async def handler(websocket):
                 # Processa os pacotes normais do jogo (movimento, tiro, etc.)
                 await received_packets(packet, player)
                 
-                
-                
     except websockets.exceptions.ConnectionClosed as e:
+        print(f"Conexão com {websocket.remote_address} fechada.", e)
+        await disconnect_player(player)
+                         
+    except Exception as e:
         # Se a conexão cair em qualquer ponto do processo...
         print(f"Conexão com {websocket.remote_address} fechada.", e)
-        if player is not None:
-            # Se o player chegou a ser criado, remove ele do jogo de forma segura
-            async with DISCONNECTION_LOCK:
-                if player.id in players:
-                    print(f"Removendo Player ID {player.id} do jogo...")
-                    del players[player.id]
-                    
-                    # Avisa aos outros jogadores que este saiu
-                    buffer_disconnect = MyBuffer()
-                    buffer_disconnect.write_u8(Network.OTHER_PLAYER_DISCONNECTED)
-                    buffer_disconnect.write_u8(player.id)
-                    await send_packet_to_all(buffer_disconnect)
-                    print(f"Player {player.id} removido. Total de players: {len(players)}")
-
-    print(f"Handler para a conexão de {websocket.remote_address} foi finalizado.")
-    if websocket in pending_connections:
-        del pending_connections[websocket]
+        await disconnect_player(player)
+        
+    finally:
+        print(f"Handler para a conexão de {websocket.remote_address} foi finalizado.")
+        if websocket in pending_connections:
+            del pending_connections[websocket]
 
 
 async def read_input():

@@ -45,4 +45,5 @@ class Network(IntEnum):
     RAT_ATTACKED = 198
     RANKING_UPDATED = 199
     CHAT_RECEIVED = 200
+    POPUP_RECEIVED = 201
     PONG = 255

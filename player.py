@@ -23,8 +23,8 @@ class Player (Entity):
         # Entity
         _x = SPAWN_POSITIONS[self.team]["x"]
         _y = SPAWN_POSITIONS[self.team]["y"]
-        _width = 40
-        _height = 40
+        _width = 64
+        _height = 22
         _rotation = 180 if self._team_id == 0 else 0
         
         _speed = 500
@@ -46,7 +46,7 @@ class Player (Entity):
         self._respawn_time = 5 # Server only
           
         # Powerups
-        self.is_sonic_mode = False
+        self._has_sonic_power_up = False
 
         
         # Conjunto para armazenar quais atributos foram alterados
@@ -213,7 +213,16 @@ class Player (Entity):
     def respawn_time(self):
         return self._respawn_time
 
+    # --- Power-ups ---#
+    @property
+    def has_sonic_power_up(self):
+        return self._has_sonic_power_up
 
+    @has_sonic_power_up.setter
+    def has_sonic_power_up(self, new_has_sonic_power_up):
+        if (new_has_sonic_power_up != self._has_sonic_power_up):
+            self._has_sonic_power_up = new_has_sonic_power_up
+            self._changed_attributes.add("has_sonic_power_up")
 
             
     # --- String Representation --- #
@@ -250,13 +259,19 @@ class Player (Entity):
         self.is_alive = False
         self.total_deaths += 1
         self.death_time = time.time()
-
+        self.reset_attributes()
 
     def respawn(self):
         self.hp = 100
         self.is_alive = True
         self.x = SPAWN_POSITIONS[self.team]["x"]
         self.y = SPAWN_POSITIONS[self.team]["y"]
+
+    def reset_attributes(self):
+        self.rotation = 180 if self._team_id == 0 else 0
+        self.speed = 500
+        self.shoot_cooldown = 0.3
+        self.has_sonic_power_up = False
 
     def change_team_id(self):
         self.team = "BLOOM" if self._team_id == 0 else "SKY"
@@ -272,11 +287,11 @@ class Player (Entity):
         self.last_shoot_time = time.time()
         
         
-        if (self.is_sonic_mode):
+        if (self.has_sonic_power_up):
             if (self.rotation >= 360):
                 self.rotation = 0
                 
-            self.rotation += 10
+            self.rotation += 1
         
 
         elif (self.rotation != 0):
@@ -288,11 +303,12 @@ class Player (Entity):
         return bullet
     
     
-    def sonic(self):
-        self.is_sonic_mode = not self.is_sonic_mode
-        self.shoot_cooldown = 0.001 if self.is_sonic_mode else 0.5
+    def power_up_sonic(self):
+        self.has_sonic_power_up = True
+        self.shoot_cooldown = 0.00001
         
-    
+
+# Colisao
     def collided_with_bullet(self, bullet):
     
         if self.id == bullet.shooter_id:
@@ -309,17 +325,18 @@ class Player (Entity):
 
 
 player_bitmask_layout = [
-    # attr          bitmask, data_type
-    ('x',              1 << 0, 'float'),
-    ('y',              1 << 1, 'float'),
-    ('is_alive',       1 << 2, 'u8'),
-    ('hp',             1 << 3, 'u8'),
-    ('team_id',        1 << 4, 'u8'),
-    ('team',           1 << 5, 'string'),
-    ('total_kills',    1 << 6, 'u16'),
-    ('speed',          1 << 7, 'float'),
-    ('shoot_cooldown', 1 << 8, 'float'),
-    ('username',       1 << 9, 'string')
+    # attr                  bitmask, data_type
+    ('x',                   1 << 0, 'float'),
+    ('y',                   1 << 1, 'float'),
+    ('is_alive',            1 << 2, 'u8'),
+    ('hp',                  1 << 3, 'u8'),
+    ('team_id',             1 << 4, 'u8'),
+    ('team',                1 << 5, 'string'),
+    ('total_kills',         1 << 6, 'u16'),
+    ('speed',               1 << 7, 'float'),
+    ('shoot_cooldown',      1 << 8, 'float'),
+    ('username',            1 << 9, 'string'),
+    ('has_sonic_power_up',  1 << 10, 'u8')
 ]
 
 
