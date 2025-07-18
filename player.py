@@ -291,7 +291,7 @@ class Player (Entity):
             if (self.rotation >= 360):
                 self.rotation = 0
                 
-            self.rotation += 1
+            self.rotation += 10
         
 
         elif (self.rotation != 0):

@@ -6,6 +6,7 @@ from player import Player, player_bitmask_layout
 from bullet import Bullet
 from network import Network
 from enum import IntEnum, auto
+from collections import defaultdict
 import aioconsole
 import time
 import pygame
@@ -74,6 +75,12 @@ async def game_loop():
     sent_30_sec_warning = False
     sent_10_sec_warning = False
     
+    # Cria um defaultdict que cria uma lista vazia []
+    grid = defaultdict(list)
+    
+    CELL_SIZE = 100
+    
+    
     # Loop do jogo
     while True:
         
@@ -82,6 +89,98 @@ async def game_loop():
         
         # Preenche a tela com tudo preto
         window.fill((0, 0, 0))
+        
+        
+        grid.clear()
+        
+        # Ex Grid:
+        #grid = {
+        #    (5, 5): [particula_A, particula_B],
+        #    (5, 6): [particula_C] }
+        
+        # Cria uma lista com todas as entities
+        all_game_entities = list(players.values()) + list(bullets)
+        
+        # Coloca cada objeto em uma cell da grid
+        for entity in all_game_entities:
+            
+            # Colocar o objeto na casa decimal correta, por exemplo
+            # Se o x dele for 1223, ele está na celula 12 no x
+            # Se o y dele for 82,   ele está na celula  8 no y
+            cell_x = entity.collision_box_x // CELL_SIZE
+            cell_y = entity.collision_box_y // CELL_SIZE
+            
+            
+            # Adiciona o objeto
+            grid[(cell_x, cell_y)].append(entity)
+            
+        
+        
+        bullets_to_remove = set()
+        
+        # Comportamento do tiro (Movimento, colisão, draw)
+        for bullet in list(bullets):
+
+            # Movimenta o tiro
+            bullet.move(DELTA)
+            
+            # Desenha o tiro
+            color = (255, 0, 0)
+            bullet_rect = pygame.Rect(bullet.collision_box_x, bullet.collision_box_y, bullet.width, 30)
+            pygame.draw.rect(window, color, bullet_rect)
+            
+             # Remover a bullet ao sair da tela
+            if bullet.x < 0 or bullet.x > WINDOW_WIDTH or bullet.y < 0 or bullet.y > WINDOW_HEIGHT:
+                bullets.remove(bullet)
+                continue
+            
+            cell_x = bullet.collision_box_x // CELL_SIZE
+            cell_y = bullet.collision_box_y // CELL_SIZE
+            
+        
+            nearby_entities = []
+            for dx in [-1, 0, 1]:      # Checa a coluna esquerda, do meio e direita
+                for dy in [-1, 0, 1]:
+                    check_cell = (cell_x + dx, cell_y + dy)
+                    
+                    # grid.get pega o valor que está na chave (primeiro parametro) e caso não encontre,
+                    # pega a lista vazia []
+                    
+                    # Pega todos os objetos da célula vizinha e despeja na lista nearby_entities
+                    nearby_entities.extend(grid.get(check_cell, []))
+                    
+                    # Se não existir a chave, ele simplesmente despeja vazio, nada
+                    
+            
+            # Verifica a colisão somente com quem está perto
+            for nearby_entity in nearby_entities:
+                
+                # A bala não pode colidir com ela mesma
+                if nearby_entity is bullet:
+                    continue
+                
+                # Verifica a colisão com player
+                if isinstance(nearby_entity, Player):
+                    if nearby_entity.collided_with_bullet(bullet):
+                        bullets_to_remove.add(bullet)
+                        await handle_request_player_damage(nearby_entity.id, bullet.shooter_id, 20)
+                        # Quebra o loop foi a bala já colidiu e será removida
+                        break
+                
+                # Verifica a colisão da bala com a bala
+                elif isinstance(nearby_entity, Bullet):
+                    # Evita que a outra bala também já tenha sido marcada para remoção
+                    if nearby_entity not in bullets_to_remove:
+                        if bullet.collided_with_bullet(nearby_entity):
+                            bullets_to_remove.add(bullet)
+                            bullets_to_remove.add(nearby_entity)
+                            break
+                        
+        # Remove da lista de bullets as bullets que foram marcadas para remoção
+        for bullet_to_remove in bullets_to_remove:
+            if bullet_to_remove in bullets:
+                bullets.remove(bullet_to_remove)
+                    
         
         # Eventos do pygame
         for event in pygame.event.get():
@@ -97,7 +196,7 @@ async def game_loop():
                     color = (99, 255, 255) if player.team_id == 0 else (255, 102, 250)
                     player_rect = pygame.Rect(player.collision_box_x, player.collision_box_y, player.width, player.height)
                     pygame.draw.rect(window, color, player_rect)
-        
+        '''
         # Desenha os tiros
         for bullet in list(bullets):
             
@@ -128,6 +227,8 @@ async def game_loop():
                 if bullet.collided_with_bullet(bullet2) and bullet in bullets and bullet2 in bullets:
                     bullets.remove(bullet)
                     bullets.remove(bullet2)
+                    
+        '''
                         
         # Checa se já pode respawnar o player
         for player in players.values():
@@ -192,10 +293,9 @@ async def game_loop():
                 match_start_time = loop.time()
             
             
-            
-                
-        
-        
+
+
+
 
 
         
@@ -245,7 +345,7 @@ async def send_packet(packet : MyBuffer, player : Player):
 
     if player.websocket.state != connection_state.OPEN:
         print(f"==FAILED TO SEND PACKET TO {player.id} STATE: {player.websocket.state.name}===")
-        await disconnect_player(player)
+        await disconnect_player(player, "SEND PACKET FAILED: CONNECTION NOT OPEN")
         return
 
     if(debug_send_packet):
@@ -773,6 +873,8 @@ async def commands(command_string, player):
             await command_move_all(args, player)
     elif command_name == "speedid" or command_name == "sid":
             await command_speed_id(args, player)
+    elif command_name == "kick":
+            await command_kick_id(args, player)
     else:
         await send_chat_message_to_player("Invalid command", player)
 
@@ -970,21 +1072,42 @@ async def command_speed_id(args, player):
     await change_speed_id(players[target_id].id, new_speed)
     #await send_chat_message_to_all(f"A velocidade do Player {target_id} foi alterada para {new_speed}.")
 
+async def command_kick_id(args, player):
+    args_needed = 1
 
-async def disconnect_player(player):
+    if(len(args) != args_needed):
+        await send_chat_message_to_player("Invalid arguments", player)
+        return
+    try:
+        player_to_kick_id = int(args[0])
+    except:
+        await send_chat_message_to_player("Invalid arguments", player)
+        return
+    if player_to_kick_id not in players:
+        await send_chat_message_to_player("Invalid player id", player)
+        return
+
+    await send_chat_message_to_all("[color=red]Player " + str(player_to_kick_id) + " foi expulso, eita o.o[/color]")
+    await disconnect_player(players[player_to_kick_id], "Kicked by other player")
+
+    
+
+
+async def disconnect_player(player, reason: str):
     if player is None or player.id not in players:
         return
     
     async with DISCONNECTION_LOCK:
         
         if player.id in players:
-            print(f"Desconectando Player {player.id}")
+            print(f"Desconectando Player {player.id}. Motivo: {reason}")
             del players[player.id]
             
             # Avisa aos outros jogadores que este saiu
             buffer_disconnect = MyBuffer()
             buffer_disconnect.write_u8(Network.OTHER_PLAYER_DISCONNECTED)
             buffer_disconnect.write_u8(player.id)
+            await player.websocket.close()
             await send_packet_to_all(buffer_disconnect)
             print(f"Player {player.id} removido. Total de players: {len(players)}")
 
@@ -1051,12 +1174,12 @@ async def handler(websocket):
                 
     except websockets.exceptions.ConnectionClosed as e:
         print(f"Conexão com {websocket.remote_address} fechada.", e)
-        await disconnect_player(player)
+        await disconnect_player(player, e.reason)
                          
     except Exception as e:
         # Se a conexão cair em qualquer ponto do processo...
         print(f"Conexão com {websocket.remote_address} fechada.", e)
-        await disconnect_player(player)
+        await disconnect_player(player, str(e))
         
     finally:
         print(f"Handler para a conexão de {websocket.remote_address} foi finalizado.")
