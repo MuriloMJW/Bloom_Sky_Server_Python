@@ -7,6 +7,10 @@ Este repositório contém o código-fonte do backend para um jogo 2D multiplayer
 
 O código para o client do jogo que se conecta ao servidor pode ser encontrado em: https://github.com/MuriloMJW/Network-Game-Client
 
+
+                                                     Visão do servidor X visão do client
+<img width="1916" height="654" alt="bloom sky" src="https://github.com/user-attachments/assets/ed8d09ca-ff18-4982-a80d-2847e747bf0d" />
+
 ## Principais Funcionalidades
 - **Comunicação em Tempo Real:** Utiliza WebSockets para uma comunicação de baixa latência entre o cliente e o servidor.
 - **Arquitetura Assíncrona:** Construído sobre o `asyncio`, o servidor pode lidar com um grande número de conexões simultâneas sem a necessidade de múltiplas threads, garantindo alta performance.
